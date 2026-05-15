@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import random
 import uuid
+from datetime import timedelta
+from enum import StrEnum
 from typing import Any
 
 import psycopg
@@ -10,6 +13,11 @@ from psycopg.rows import dict_row
 from taskqueue.models import Job, JobStatus
 
 NOTIFY_CHANNEL = "jobs_new"
+NOTIFY_DONE_CHANNEL = "jobs_done"
+
+BACKOFF_BASE_SECONDS = 10
+BACKOFF_CAP_SECONDS = 3600
+BACKOFF_JITTER_RATIO = 0.2
 
 
 class DuplicateJobError(Exception):
@@ -18,6 +26,19 @@ class DuplicateJobError(Exception):
     def __init__(self, idempotency_key: str):
         super().__init__(f"job with idempotency_key={idempotency_key!r} already exists")
         self.idempotency_key = idempotency_key
+
+
+class JobNotRunningError(Exception):
+    """Raised when ack/nack is called on a job not in the running state."""
+
+    def __init__(self, job_id: uuid.UUID):
+        super().__init__(f"job {job_id} is not in 'running' state")
+        self.job_id = job_id
+
+
+class NackOutcome(StrEnum):
+    RETRYING = "retrying"
+    DEAD_LETTERED = "dead_lettered"
 
 
 def enqueue(
@@ -103,3 +124,110 @@ def dequeue(
     if row is None:
         return None
     return Job(**row)
+
+
+def ack(
+    conn: psycopg.Connection,
+    *,
+    job_id: uuid.UUID,
+    result_payload: dict[str, Any] | None = None,
+) -> None:
+    """Mark a running job succeeded. Commits on success.
+
+    Raises JobNotRunningError if the row is not currently in 'running' (e.g.
+    the lease expired and the reaper put it back, or ack was called twice).
+    Fires NOTIFY on NOTIFY_DONE_CHANNEL with the job id as payload.
+    """
+    payload_param = (
+        psycopg.types.json.Jsonb(result_payload) if result_payload is not None else None
+    )
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            UPDATE jobs
+            SET status = %s,
+                result_payload = %s::jsonb,
+                completed_at = now(),
+                lease_expires_at = NULL,
+                worker_id = NULL
+            WHERE id = %s AND status = %s
+            RETURNING id
+            """,
+            (JobStatus.SUCCEEDED, payload_param, job_id, JobStatus.RUNNING),
+        )
+        if cur.fetchone() is None:
+            conn.rollback()
+            raise JobNotRunningError(job_id)
+        cur.execute("SELECT pg_notify(%s, %s)", (NOTIFY_DONE_CHANNEL, str(job_id)))
+    conn.commit()
+
+
+def _compute_backoff(attempt: int) -> timedelta:
+    """Exponential backoff with jitter: base*2^(attempt-1), capped, ±jitter.
+
+    attempt is 1-indexed (first retry uses attempt=1).
+    """
+    if attempt < 1:
+        raise ValueError(f"attempt must be >= 1, got {attempt}")
+    raw = BACKOFF_BASE_SECONDS * (2 ** (attempt - 1))
+    capped = min(raw, BACKOFF_CAP_SECONDS)
+    jitter = capped * BACKOFF_JITTER_RATIO * (2 * random.random() - 1)
+    return timedelta(seconds=capped + jitter)
+
+
+def nack(
+    conn: psycopg.Connection,
+    *,
+    job_id: uuid.UUID,
+    error_message: str | None = None,
+) -> NackOutcome:
+    """Record a job failure. Commits on success.
+
+    If attempt_count < max_attempts, the job goes back to 'queued' with
+    retry_after set to now + exponential backoff. Otherwise it is routed
+    to dead_letter. Returns which outcome was taken.
+
+    Raises JobNotRunningError if the row is not currently 'running'.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT attempt_count, max_attempts FROM jobs WHERE id = %s AND status = %s FOR UPDATE",
+            (job_id, JobStatus.RUNNING),
+        )
+        row = cur.fetchone()
+        if row is None:
+            conn.rollback()
+            raise JobNotRunningError(job_id)
+        attempt_count, max_attempts = row
+
+        if attempt_count >= max_attempts:
+            cur.execute(
+                """
+                UPDATE jobs
+                SET status = %s,
+                    completed_at = now(),
+                    error_message = %s,
+                    lease_expires_at = NULL,
+                    worker_id = NULL
+                WHERE id = %s
+                """,
+                (JobStatus.DEAD_LETTER, error_message, job_id),
+            )
+            outcome = NackOutcome.DEAD_LETTERED
+        else:
+            backoff = _compute_backoff(attempt_count)
+            cur.execute(
+                """
+                UPDATE jobs
+                SET status = %s,
+                    retry_after = now() + %s,
+                    error_message = %s,
+                    lease_expires_at = NULL,
+                    worker_id = NULL
+                WHERE id = %s
+                """,
+                (JobStatus.QUEUED, backoff, error_message, job_id),
+            )
+            outcome = NackOutcome.RETRYING
+    conn.commit()
+    return outcome
