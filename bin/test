@@ -8,6 +8,18 @@
 
 set -euo pipefail
 
+# Prepend the project's .venv to PATH so pytest is found without requiring
+# the user to activate the venv first.
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+VENV_BIN="$(dirname "$SCRIPT_DIR")/.venv/bin"
+if [ -x "$VENV_BIN/pytest" ]; then
+    PATH="$VENV_BIN:$PATH"
+elif ! command -v pytest >/dev/null 2>&1; then
+    echo "error: pytest not found on PATH and no .venv at $VENV_BIN" >&2
+    echo "create the venv with: python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'" >&2
+    exit 1
+fi
+
 if ! kubectl get svc postgres >/dev/null 2>&1; then
     echo "error: 'postgres' service not found in current kubectl context" >&2
     echo "is minikube running and are the manifests applied? (kubectl apply -f k8s/)" >&2
