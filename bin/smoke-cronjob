@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+# End-to-end smoke test for the reaper CronJob.
+#
+# Builds the image into minikube, seeds a fake stuck job in the live
+# Postgres, triggers the CronJob template via `kubectl create job
+# --from=...`, asserts that the reaper logged "reclaimed 1" and that the
+# row was actually flipped back to 'queued'. Cleans up the test row and
+# Job on exit (success or failure).
+#
+# Run this before pushing manifest changes or after a fresh minikube
+# setup. For the fast Python/SQL test loop, use ./bin/test.
+
+set -euo pipefail
+
+if ! kubectl get svc postgres >/dev/null 2>&1; then
+    echo "error: 'postgres' service not found — is minikube running with k8s/ applied?" >&2
+    exit 1
+fi
+
+if ! kubectl get cronjob taskqueue-reaper >/dev/null 2>&1; then
+    echo "error: taskqueue-reaper CronJob not found — run 'kubectl apply -f k8s/reaper-cronjob.yaml'" >&2
+    exit 1
+fi
+
+# Unique key so concurrent or repeated runs never collide on the
+# idempotency_key UNIQUE constraint.
+KEY="smoke-stuck-$(date +%s)-$$"
+JOB="reaper-smoke-$(date +%s)-$$"
+
+cleanup() {
+    kubectl delete job "$JOB" --ignore-not-found >/dev/null 2>&1 || true
+    kubectl exec deploy/postgres -- psql -U taskqueue -d taskqueue -q -c \
+        "DELETE FROM jobs WHERE idempotency_key='$KEY';" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+
+echo "==> Building image into minikube's docker daemon"
+eval "$(minikube docker-env)"
+docker build -q -t taskqueue:latest . >/dev/null
+
+echo "==> Seeding stuck job ($KEY) with expired lease"
+kubectl exec deploy/postgres -- psql -U taskqueue -d taskqueue -q -c "
+INSERT INTO jobs (idempotency_key, job_type, payload, status, worker_id,
+                  lease_expires_at, attempt_count)
+VALUES ('$KEY', 't', '{}', 'running', 'dead-worker',
+        now() - interval '5 minutes', 1);
+" >/dev/null
+
+echo "==> Triggering reaper from CronJob template ($JOB)"
+kubectl create job --from=cronjob/taskqueue-reaper "$JOB" >/dev/null
+kubectl wait --for=condition=complete "job/$JOB" --timeout=60s >/dev/null
+
+echo "==> Checking logs"
+LOGS=$(kubectl logs "job/$JOB")
+echo "    $LOGS"
+if ! echo "$LOGS" | grep -q "reclaimed 1 expired leases"; then
+    echo "FAIL: expected 'reclaimed 1 expired leases', got: $LOGS" >&2
+    exit 1
+fi
+
+echo "==> Verifying row was flipped back to queued"
+STATUS=$(kubectl exec deploy/postgres -- psql -U taskqueue -d taskqueue -tA -c \
+    "SELECT status FROM jobs WHERE idempotency_key='$KEY';")
+if [ "$STATUS" != "queued" ]; then
+    echo "FAIL: expected status=queued, got '$STATUS'" >&2
+    exit 1
+fi
+
+echo "==> PASS"

@@ -4,7 +4,7 @@ import uuid
 
 import pytest
 
-from taskqueue import NOTIFY_CHANNEL, DuplicateJobError, JobStatus, enqueue
+from taskqueue import NOTIFY_NEW_CHANNEL, DuplicateJobError, JobStatus, enqueue
 
 
 def test_enqueue_returns_uuid_and_inserts_row(conn):
@@ -38,11 +38,11 @@ def test_duplicate_idempotency_key_raises(conn):
 def test_enqueue_emits_notify(conn, make_conn):
     listener = make_conn()
     listener.autocommit = True
-    listener.execute(f"LISTEN {NOTIFY_CHANNEL}")
+    listener.execute(f"LISTEN {NOTIFY_NEW_CHANNEL}")
 
     job_id = enqueue(conn, idempotency_key="notify-1", job_type="t", payload={})
 
     received = next(listener.notifies(timeout=2.0, stop_after=1), None)
     assert received is not None, "no NOTIFY received within timeout"
-    assert received.channel == NOTIFY_CHANNEL
+    assert received.channel == NOTIFY_NEW_CHANNEL
     assert received.payload == str(job_id)
