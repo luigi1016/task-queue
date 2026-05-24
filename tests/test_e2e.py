@@ -23,7 +23,7 @@ import taskqueue
 from taskqueue import JobStatus, db
 from taskqueue.registry import clear_registry
 
-from demo_service.handlers import JOB_TYPES
+from demo_service.handlers import FLAKY, JOB_TYPES
 from demo_service.worker_main import build_worker
 
 
@@ -54,7 +54,7 @@ def _produce_bounded(n: int, max_attempts: int = 1) -> None:
     for _ in range(n):
         job_type = random.choice(JOB_TYPES)
         payload: dict[str, float] = {"duration_s": round(random.uniform(0.02, 0.1), 3)}
-        if job_type == "flaky":
+        if job_type == FLAKY:
             payload["fail_rate"] = round(random.uniform(0.2, 0.5), 3)
         with db.get_connection() as c:
             taskqueue.enqueue(

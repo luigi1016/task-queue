@@ -23,8 +23,14 @@ from typing import Any
 
 import taskqueue
 
+# Job type identifiers. Defined once so the decorator argument and the
+# JOB_TYPES list below stay in sync (and so other modules importing these
+# don't have to repeat the magic strings).
+SLEEP = "sleep"
+FLAKY = "flaky"
 
-@taskqueue.task("sleep")
+
+@taskqueue.task(SLEEP)
 def sleep_handler(payload: dict[str, Any]) -> dict[str, Any]:
     """Sleep for ``payload['duration_s']`` seconds, then succeed."""
     duration = float(payload.get("duration_s", 0.1))
@@ -32,7 +38,7 @@ def sleep_handler(payload: dict[str, Any]) -> dict[str, Any]:
     return {"slept_for": duration}
 
 
-@taskqueue.task("flaky")
+@taskqueue.task(FLAKY)
 def flaky_handler(payload: dict[str, Any]) -> dict[str, Any]:
     """Sleep briefly, then succeed or raise based on ``payload['fail_rate']``."""
     time.sleep(float(payload.get("duration_s", 0.1)))
@@ -44,4 +50,4 @@ def flaky_handler(payload: dict[str, Any]) -> dict[str, Any]:
 
 # Producer-side: the job_type strings this demo emits. The producer doesn't
 # need the handler functions themselves — only the names it can enqueue.
-JOB_TYPES = ["sleep", "flaky"]
+JOB_TYPES = [SLEEP, FLAKY]
