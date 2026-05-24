@@ -21,9 +21,27 @@ import pytest
 
 import taskqueue
 from taskqueue import JobStatus, db
+from taskqueue.registry import clear_registry
 
-from demo_service.handlers import HANDLERS
+from demo_service.handlers import JOB_TYPES
 from demo_service.worker_main import build_worker
+
+
+@pytest.fixture(autouse=True)
+def _clean_registry_around_e2e():
+    """The demo's @task decorators populate the default registry on import.
+
+    Other tests (e.g. test_registry.py) call clear_registry() between
+    cases, which would wipe the demo's registrations. Re-importing the
+    demo's handlers module here re-runs the decorators so the e2e worker
+    always sees them, regardless of test ordering.
+    """
+    import importlib
+    import demo_service.handlers
+
+    clear_registry()
+    importlib.reload(demo_service.handlers)
+    yield
 
 
 def _produce_bounded(n: int, max_attempts: int = 1) -> None:
@@ -33,9 +51,8 @@ def _produce_bounded(n: int, max_attempts: int = 1) -> None:
     sleep and stop event — we want a finite stream for the test rather
     than the infinite production loop.
     """
-    job_types = list(HANDLERS.keys())
     for _ in range(n):
-        job_type = random.choice(job_types)
+        job_type = random.choice(JOB_TYPES)
         payload: dict[str, float] = {"duration_s": round(random.uniform(0.02, 0.1), 3)}
         if job_type == "flaky":
             payload["fail_rate"] = round(random.uniform(0.2, 0.5), 3)

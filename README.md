@@ -208,12 +208,13 @@ Producer env vars:
 ## Using `taskqueue` as a library
 
 The producer and worker in `examples/demo_service/` are reference code for
-what a real consumer would write. The integration surface is small:
+what a real consumer would write. The integration surface is small.
+
+### Enqueuing (same in both styles)
 
 ```python
 import taskqueue
 
-# 1. Enqueue from anywhere
 with taskqueue.db.get_connection() as conn:
     taskqueue.enqueue(
         conn,
@@ -222,24 +223,59 @@ with taskqueue.db.get_connection() as conn:
         payload={"to": "a@b.com", "subject": "..."},
         priority=5,
     )
+```
 
-# 2. Define handlers (one function per job_type)
+### Worker — decorator style (recommended)
+
+```python
+# myapp/handlers.py
+import taskqueue
+
+@taskqueue.task("send_email")
 def send_email(payload):
     smtp.send(...)
     return {"sent_at": time.time()}   # becomes the row's result_payload
 
-# 3. Run a worker that dispatches to them
+# myapp/worker_main.py
+import taskqueue
+import myapp.handlers      # noqa: F401 — side effect: runs @task decorators
+
+worker = taskqueue.Worker(worker_id=socket.gethostname(), concurrency=4)
+worker.run()
+```
+
+The `@taskqueue.task("send_email")` line is two function calls at import
+time: it builds a closure capturing `"send_email"`, then runs it on the
+decorated function and stores the pair in a module-level dict. The
+decorated function is returned unchanged and is still directly callable
+in your own code.
+
+**The handler module import is load-bearing.** Without
+`import myapp.handlers`, the decorators never run and the registry stays
+empty — every job would nack with "no handler registered." Lint configs
+should treat `taskqueue.task`-decorated modules as not-actually-unused.
+
+### Worker — dependency-injection style (still supported)
+
+```python
+import taskqueue
+
+def send_email(payload):
+    smtp.send(...)
+    return {"sent_at": time.time()}
+
 worker = taskqueue.Worker(
-    handlers={"send_email": send_email},
+    handlers={"send_email": send_email},   # explicit dict
     worker_id=socket.gethostname(),
     concurrency=4,
 )
 worker.run()
 ```
 
-The library provides no decorator / global registry — handlers are
-dependency-injected via the `handlers={...}` dict so the library has zero
-knowledge of your job types.
+Prefer this when you need multiple workers with different handler sets in
+one process, or in tests where global registry state would leak between
+cases. `Worker(handlers={...})` overrides the default-from-registry
+behavior — handlers registered via `@task` are ignored.
 
 ## Run tests
 
@@ -303,6 +339,7 @@ src/taskqueue/       # Library source code
   db.py              # Database connection
   queue.py           # enqueue / dequeue / ack / nack
   notify.py          # listen() — block until NOTIFY or timeout
+  registry.py        # @task decorator + default handler registry
   worker.py          # Worker class (serial + thread-pool modes)
   reaper.py          # Reclaim expired leases
   migrate.py         # Runs SQL migrations

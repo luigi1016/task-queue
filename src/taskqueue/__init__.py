@@ -11,6 +11,7 @@ from taskqueue.queue import (
     enqueue,
     nack,
 )
+from taskqueue.registry import task
 from taskqueue.worker import Worker
 
 # Note: taskqueue.reaper is intentionally NOT re-exported here. It's a script
@@ -34,5 +35,6 @@ __all__ = [
     "enqueue",
     "listen",
     "nack",
+    "task",
     "__version__",
 ]

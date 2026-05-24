@@ -17,13 +17,13 @@ import uuid
 import taskqueue
 from taskqueue import db
 
-from demo_service.handlers import HANDLERS
+from demo_service.handlers import JOB_TYPES
 
 logger = logging.getLogger(__name__)
 
 
 def _build_random_job() -> tuple[str, dict[str, float], int]:
-    job_type = random.choice(list(HANDLERS.keys()))
+    job_type = random.choice(JOB_TYPES)
     payload: dict[str, float] = {"duration_s": round(random.uniform(0.05, 0.5), 3)}
     if job_type == "flaky":
         payload["fail_rate"] = round(random.uniform(0.1, 0.4), 3)

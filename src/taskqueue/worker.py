@@ -55,12 +55,19 @@ class Worker:
 
     Parameters
     ----------
-    handlers : dict[str, HandlerFn]
+    handlers : dict[str, HandlerFn] or None, default None
         Maps ``job_type`` → handler. The handler receives the job's payload
         and returns a result dict (stored as ``result_payload`` on the row)
         or ``None``. Raising any exception is treated as failure and the
         job is nacked (retry-with-backoff or dead-letter, depending on the
         job's remaining attempts).
+
+        When ``None`` (the default), the worker falls back to
+        ``taskqueue.registry.registered_handlers()`` — i.e. everything
+        registered via the ``@taskqueue.task`` decorator at import time.
+        Pass an explicit dict to bypass the registry (useful for tests or
+        for running multiple workers with different handler sets in one
+        process).
     worker_id : str
         Recorded on each claimed row. Use a stable, identifiable string
         (typically the pod's hostname) so leases are traceable.
@@ -78,7 +85,7 @@ class Worker:
     def __init__(
         self,
         *,
-        handlers: dict[str, HandlerFn],
+        handlers: dict[str, HandlerFn] | None = None,
         worker_id: str,
         concurrency: int = 1,
         lease_seconds: int = 60,
@@ -86,6 +93,11 @@ class Worker:
     ):
         if concurrency < 1:
             raise ValueError(f"concurrency must be >= 1, got {concurrency}")
+        if handlers is None:
+            # Late import so worker.py doesn't pull in registry at import
+            # time (keeps the dependency direction one-way).
+            from taskqueue.registry import registered_handlers
+            handlers = registered_handlers()
         self.handlers = handlers
         self.worker_id = worker_id
         self.concurrency = concurrency

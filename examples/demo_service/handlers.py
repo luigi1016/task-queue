@@ -9,6 +9,10 @@ Handlers receive the job's payload (a ``dict``) and either:
 
 - return a ``dict`` (or ``None``) → worker calls ``ack``
 - raise any exception → worker calls ``nack`` (retry or dead-letter)
+
+The ``@taskqueue.task("...")`` decorator registers each function in the
+library's default registry as a side effect of importing this module. The
+worker's ``build_worker()`` then picks them up automatically.
 """
 
 from __future__ import annotations
@@ -17,7 +21,10 @@ import random
 import time
 from typing import Any
 
+import taskqueue
 
+
+@taskqueue.task("sleep")
 def sleep_handler(payload: dict[str, Any]) -> dict[str, Any]:
     """Sleep for ``payload['duration_s']`` seconds, then succeed."""
     duration = float(payload.get("duration_s", 0.1))
@@ -25,6 +32,7 @@ def sleep_handler(payload: dict[str, Any]) -> dict[str, Any]:
     return {"slept_for": duration}
 
 
+@taskqueue.task("flaky")
 def flaky_handler(payload: dict[str, Any]) -> dict[str, Any]:
     """Sleep briefly, then succeed or raise based on ``payload['fail_rate']``."""
     time.sleep(float(payload.get("duration_s", 0.1)))
@@ -34,7 +42,6 @@ def flaky_handler(payload: dict[str, Any]) -> dict[str, Any]:
     return {"ok": True}
 
 
-HANDLERS = {
-    "sleep": sleep_handler,
-    "flaky": flaky_handler,
-}
+# Producer-side: the job_type strings this demo emits. The producer doesn't
+# need the handler functions themselves — only the names it can enqueue.
+JOB_TYPES = ["sleep", "flaky"]

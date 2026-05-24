@@ -14,7 +14,10 @@ import socket
 
 import taskqueue
 
-from demo_service.handlers import HANDLERS
+# Side-effect import: running this module's @taskqueue.task decorators is
+# what populates the registry that Worker(handlers=None) reads. Without
+# this line, the worker would start with an empty handler set.
+import demo_service.handlers  # noqa: F401
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +30,6 @@ def build_worker() -> taskqueue.Worker:
     main thread).
     """
     return taskqueue.Worker(
-        handlers=HANDLERS,
         worker_id=os.environ.get("WORKER_ID", socket.gethostname()),
         concurrency=int(os.environ.get("WORKER_CONCURRENCY", "1")),
         lease_seconds=int(os.environ.get("LEASE_SECONDS", "60")),
