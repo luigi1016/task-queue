@@ -1,0 +1,59 @@
+"""Example handlers used by the demo worker.
+
+In a real consumer of the ``taskqueue`` library, these would do actual
+work — call an API, generate a PDF, send an email, etc. Here they just
+sleep and (for one of them) randomly fail, so we can demonstrate the
+full success / retry / dead-letter lifecycle without external systems.
+
+Handlers receive the job's payload (a ``dict``) and either:
+
+- return a ``dict`` (or ``None``) → worker calls ``ack``
+- raise any exception → worker calls ``nack`` (retry or dead-letter)
+
+The ``@taskqueue.task("...")`` decorator registers each function in the
+library's default registry as a side effect of importing this module. The
+worker's ``build_worker()`` then picks them up automatically.
+"""
+
+from __future__ import annotations
+
+import logging
+import random
+import time
+from typing import Any
+
+import taskqueue
+
+logger = logging.getLogger(__name__)
+
+# Job type identifiers. Defined once so the decorator argument and the
+# JOB_TYPES list below stay in sync (and so other modules importing these
+# don't have to repeat the magic strings).
+SLEEP = "sleep"
+FLAKY = "flaky"
+
+
+@taskqueue.task(SLEEP)
+def sleep_handler(payload: dict[str, Any]) -> dict[str, Any]:
+    """Sleep for ``payload['duration_s']`` seconds, then succeed."""
+    duration = float(payload.get("duration_s", 0.1))
+    logger.info("sleep handler: sleeping for %.3fs", duration)
+    time.sleep(duration)
+    return {"slept_for": duration}
+
+
+@taskqueue.task(FLAKY)
+def flaky_handler(payload: dict[str, Any]) -> dict[str, Any]:
+    """Sleep briefly, then succeed or raise based on ``payload['fail_rate']``."""
+    duration = float(payload.get("duration_s", 0.1))
+    fail_rate = float(payload.get("fail_rate", 0.3))
+    logger.info("flaky handler: sleeping for %.3fs (fail_rate=%.2f)", duration, fail_rate)
+    time.sleep(duration)
+    if random.random() < fail_rate:
+        raise RuntimeError("simulated failure")
+    return {"ok": True}
+
+
+# Producer-side: the job_type strings this demo emits. The producer doesn't
+# need the handler functions themselves — only the names it can enqueue.
+JOB_TYPES = [SLEEP, FLAKY]

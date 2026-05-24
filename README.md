@@ -92,6 +92,39 @@ kubectl wait --for=condition=complete job/taskqueue-migrate --timeout=60s
 kubectl logs job/taskqueue-migrate
 ```
 
+### Deploy the worker and producer
+
+The same container image runs as both, dispatched by the `ROLE` env var to
+two different entry points in `examples/demo_service/` — the same code you
+could run locally with `python -m`. In a real consumer's deployment, you'd
+replace `demo_service` with your own application package.
+
+```bash
+kubectl apply -f k8s/worker-deployment.yaml
+kubectl apply -f k8s/producer-deployment.yaml
+```
+
+Watch jobs flow:
+
+```bash
+kubectl logs -l app=taskqueue-producer -f      # see enqueues
+kubectl logs -l app=taskqueue-worker -f        # see handlers fire
+kubectl exec deploy/postgres -- psql -U taskqueue -d taskqueue \
+  -c "SELECT status, count(*) FROM jobs GROUP BY status;"
+```
+
+Scale workers horizontally (each pod uses `SELECT ... FOR UPDATE SKIP LOCKED`
+on dequeue, so no two pods ever claim the same job — no coordination needed):
+
+```bash
+kubectl scale deployment/taskqueue-worker --replicas=3
+```
+
+`terminationGracePeriodSeconds: 90` on the worker Deployment must exceed
+`LEASE_SECONDS` plus the longest expected handler runtime — otherwise k8s
+will `SIGKILL` mid-handler and the reaper has to clean up the orphaned
+lease.
+
 ### Deploy the lease reaper
 
 The reaper runs as a Kubernetes CronJob — once a minute it scans for jobs
@@ -124,6 +157,125 @@ Forbid` prevents overlapping runs if a tick is slow.
 - `minikube stop` — pauses everything, data is preserved
 - `minikube start` — brings it back, Kubernetes restarts your pods automatically (no need to re-apply manifests)
 - `minikube delete` — destroys the cluster and all data
+
+## Run the demo service locally
+
+You can exercise the producer/worker loop without minikube by pointing them
+at any reachable Postgres. The easiest source is the minikube Postgres via
+`kubectl port-forward`.
+
+```bash
+# Terminal 1 — port-forward Postgres
+kubectl port-forward svc/postgres 5432:5432
+
+# Terminal 2 — worker
+export DATABASE_URL=postgres://taskqueue:taskqueue-dev-password@localhost:5432/taskqueue
+export PYTHONPATH=$PWD/src:$PWD/examples
+python -m demo_service.worker_main
+
+# Terminal 3 — producer
+export DATABASE_URL=postgres://taskqueue:taskqueue-dev-password@localhost:5432/taskqueue
+export PYTHONPATH=$PWD/src:$PWD/examples
+python -m demo_service.producer_main
+
+# Terminal 4 — observe
+psql "$DATABASE_URL" -c "SELECT status, count(*) FROM jobs GROUP BY status;"
+```
+
+You should see `succeeded` and `dead_letter` counts grow steadily while
+`queued`/`running` stay small and transient. `Ctrl+C` on either service
+triggers a clean shutdown (in-flight handlers finish; no new dequeues).
+
+### Configuration
+
+Worker env vars:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `WORKER_ID` | `$HOSTNAME` | Recorded on each claimed row for lease traceability |
+| `WORKER_CONCURRENCY` | `1` | Handler threads per pod (1 = serial, no pool) |
+| `POLL_INTERVAL_S` | `5.0` | Max time `listen()` blocks before re-checking the queue |
+| `LEASE_SECONDS` | `60` | Lease duration on each claimed job |
+
+Producer env vars:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `PRODUCER_INTERVAL_S` | `1.0` | Sleep between enqueues |
+| `PRODUCER_MAX_PRIORITY` | `9` | Top of the random priority range |
+| `PRODUCER_MAX_ATTEMPTS` | `3` | `max_attempts` set on each enqueued job |
+
+## Using `taskqueue` as a library
+
+The producer and worker in `examples/demo_service/` are reference code for
+what a real consumer would write. The integration surface is small.
+
+### Enqueuing (same in both styles)
+
+```python
+import taskqueue
+
+with taskqueue.db.get_connection() as conn:
+    taskqueue.enqueue(
+        conn,
+        idempotency_key="unique-key",
+        job_type="send_email",
+        payload={"to": "a@b.com", "subject": "..."},
+        priority=5,
+    )
+```
+
+### Worker — decorator style (recommended)
+
+```python
+# myapp/handlers.py
+import taskqueue
+
+@taskqueue.task("send_email")
+def send_email(payload):
+    smtp.send(...)
+    return {"sent_at": time.time()}   # becomes the row's result_payload
+
+# myapp/worker_main.py
+import taskqueue
+import myapp.handlers      # noqa: F401 — side effect: runs @task decorators
+
+worker = taskqueue.Worker(worker_id=socket.gethostname(), concurrency=4)
+worker.run()
+```
+
+The `@taskqueue.task("send_email")` line is two function calls at import
+time: it builds a closure capturing `"send_email"`, then runs it on the
+decorated function and stores the pair in a module-level dict. The
+decorated function is returned unchanged and is still directly callable
+in your own code.
+
+**The handler module import is load-bearing.** Without
+`import myapp.handlers`, the decorators never run and the registry stays
+empty — every job would nack with "no handler registered." Lint configs
+should treat `taskqueue.task`-decorated modules as not-actually-unused.
+
+### Worker — dependency-injection style (still supported)
+
+```python
+import taskqueue
+
+def send_email(payload):
+    smtp.send(...)
+    return {"sent_at": time.time()}
+
+worker = taskqueue.Worker(
+    handlers={"send_email": send_email},   # explicit dict
+    worker_id=socket.gethostname(),
+    concurrency=4,
+)
+worker.run()
+```
+
+Prefer this when you need multiple workers with different handler sets in
+one process, or in tests where global registry state would leak between
+cases. `Worker(handlers={...})` overrides the default-from-registry
+behavior — handlers registered via `@task` are ignored.
 
 ## Run tests
 
@@ -185,18 +337,26 @@ src/taskqueue/       # Library source code
   __init__.py
   models.py          # Job dataclass
   db.py              # Database connection
+  queue.py           # enqueue / dequeue / ack / nack
+  notify.py          # listen() — block until NOTIFY or timeout
+  registry.py        # @task decorator + default handler registry
+  worker.py          # Worker class (serial + thread-pool modes)
+  reaper.py          # Reclaim expired leases
   migrate.py         # Runs SQL migrations
+examples/demo_service/   # Example consumer of the library (not part of the wheel)
+  handlers.py        # sleep_handler, flaky_handler
+  worker_main.py     # python -m demo_service.worker_main
+  producer_main.py   # python -m demo_service.producer_main
 tests/               # Test suite
 migrations/          # SQL migration files
-  001_create_jobs.sql
 k8s/                 # Kubernetes manifests
-  postgres-secret.yaml
-  postgres-pvc.yaml
-  postgres-deployment.yaml
-  postgres-service.yaml
-  migrate-job.yaml   # One-shot Job to run migrations
-Dockerfile           # Single image, multiple roles via ROLE env var
-entrypoint.sh        # Dispatches to producer/worker/reaper/cleanup/migrate
+  postgres-*.yaml
+  migrate-job.yaml
+  reaper-cronjob.yaml
+  worker-deployment.yaml
+  producer-deployment.yaml
+Dockerfile           # Single image; ROLE env var selects entry point
+entrypoint.sh        # Dispatches ROLE to demo_service or taskqueue entry points
 pyproject.toml       # Package metadata and dependencies
 ```
 

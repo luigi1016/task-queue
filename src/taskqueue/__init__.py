@@ -1,4 +1,5 @@
 from taskqueue.models import Job, JobStatus
+from taskqueue.notify import listen
 from taskqueue.queue import (
     NOTIFY_NEW_CHANNEL,
     NOTIFY_DONE_CHANNEL,
@@ -10,6 +11,8 @@ from taskqueue.queue import (
     enqueue,
     nack,
 )
+from taskqueue.registry import task
+from taskqueue.worker import Worker
 
 # Note: taskqueue.reaper is intentionally NOT re-exported here. It's a script
 # entry point, not part of the library surface — re-exporting it would cause
@@ -26,9 +29,12 @@ __all__ = [
     "JobNotRunningError",
     "JobStatus",
     "NackOutcome",
+    "Worker",
     "ack",
     "dequeue",
     "enqueue",
+    "listen",
     "nack",
+    "task",
     "__version__",
 ]

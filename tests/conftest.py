@@ -19,6 +19,10 @@ def _dsn() -> str:
 @pytest.fixture(scope="session", autouse=True)
 def _apply_migrations() -> None:
     dsn = _dsn()
+    # Mirror TEST_DATABASE_URL into DATABASE_URL so library code that calls
+    # taskqueue.db.get_connection() (the Worker, the demo service) ends up
+    # pointing at the same test database the fixtures use.
+    os.environ.setdefault("DATABASE_URL", dsn)
     with psycopg.connect(dsn) as conn, conn.cursor() as cur:
         for migration in sorted(MIGRATIONS_DIR.glob("*.sql")):
             cur.execute(migration.read_text())

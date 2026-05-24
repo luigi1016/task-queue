@@ -1,0 +1,34 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: taskqueue-producer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: taskqueue-producer
+  template:
+    metadata:
+      labels:
+        app: taskqueue-producer
+    spec:
+      # Producer is stateless — a short grace period is enough.
+      terminationGracePeriodSeconds: 10
+      containers:
+        - name: producer
+          image: taskqueue:latest
+          imagePullPolicy: Never
+          env:
+            - name: ROLE
+              value: producer
+            - name: PRODUCER_INTERVAL_S
+              value: "1.0"
+            - name: PRODUCER_MAX_PRIORITY
+              value: "9"
+            - name: PRODUCER_MAX_ATTEMPTS
+              value: "3"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: DATABASE_URL

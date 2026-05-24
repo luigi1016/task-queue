@@ -1,0 +1,36 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: taskqueue-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: taskqueue-worker
+  template:
+    metadata:
+      labels:
+        app: taskqueue-worker
+    spec:
+      # Must exceed LEASE_SECONDS + the longest expected handler runtime
+      # so k8s doesn't SIGKILL the pod mid-job (otherwise the reaper has
+      # to clean up the orphaned lease ~1 minute later).
+      terminationGracePeriodSeconds: 90
+      containers:
+        - name: worker
+          image: taskqueue:latest
+          imagePullPolicy: Never  # use the image built into minikube's daemon
+          env:
+            - name: ROLE
+              value: worker
+            - name: WORKER_CONCURRENCY
+              value: "2"
+            - name: POLL_INTERVAL_S
+              value: "5"
+            - name: LEASE_SECONDS
+              value: "60"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-secret
+                  key: DATABASE_URL
