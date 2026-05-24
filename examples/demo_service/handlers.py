@@ -17,11 +17,14 @@ worker's ``build_worker()`` then picks them up automatically.
 
 from __future__ import annotations
 
+import logging
 import random
 import time
 from typing import Any
 
 import taskqueue
+
+logger = logging.getLogger(__name__)
 
 # Job type identifiers. Defined once so the decorator argument and the
 # JOB_TYPES list below stay in sync (and so other modules importing these
@@ -34,6 +37,7 @@ FLAKY = "flaky"
 def sleep_handler(payload: dict[str, Any]) -> dict[str, Any]:
     """Sleep for ``payload['duration_s']`` seconds, then succeed."""
     duration = float(payload.get("duration_s", 0.1))
+    logger.info("sleep handler: sleeping for %.3fs", duration)
     time.sleep(duration)
     return {"slept_for": duration}
 
@@ -41,8 +45,10 @@ def sleep_handler(payload: dict[str, Any]) -> dict[str, Any]:
 @taskqueue.task(FLAKY)
 def flaky_handler(payload: dict[str, Any]) -> dict[str, Any]:
     """Sleep briefly, then succeed or raise based on ``payload['fail_rate']``."""
-    time.sleep(float(payload.get("duration_s", 0.1)))
+    duration = float(payload.get("duration_s", 0.1))
     fail_rate = float(payload.get("fail_rate", 0.3))
+    logger.info("flaky handler: sleeping for %.3fs (fail_rate=%.2f)", duration, fail_rate)
+    time.sleep(duration)
     if random.random() < fail_rate:
         raise RuntimeError("simulated failure")
     return {"ok": True}

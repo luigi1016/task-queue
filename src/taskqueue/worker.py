@@ -203,10 +203,17 @@ class Worker:
             # Lease expired and reaper put the job back, or someone else
             # already finalized it. Log and move on — we no longer own it.
             logger.warning("ack failed: job %s no longer in running state", job.id)
+            return
+        logger.info("job %s acked (type=%s)", job.id, job.job_type)
 
     def _fail(self, job: Job, error_message: str) -> None:
         try:
             with db.get_connection() as conn:
-                nack(conn, job_id=job.id, error_message=error_message)
+                outcome = nack(conn, job_id=job.id, error_message=error_message)
         except JobNotRunningError:
             logger.warning("nack failed: job %s no longer in running state", job.id)
+            return
+        logger.info(
+            "job %s nacked: %s (type=%s, error=%s)",
+            job.id, outcome.value, job.job_type, error_message,
+        )
