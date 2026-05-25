@@ -19,8 +19,9 @@ def test_reaper_reclaims_expired_lease(conn):
     assert job is not None
     _expire_lease(conn, job.id)
 
-    n = reclaim_expired_leases(conn)
-    assert n == 1
+    reclaimed, dead_lettered = reclaim_expired_leases(conn)
+    assert reclaimed == 1
+    assert dead_lettered == 0
 
     with conn.cursor() as cur:
         cur.execute(
@@ -42,8 +43,7 @@ def test_reaper_ignores_fresh_lease(conn):
     job = dequeue(conn, worker_id="w1")
     assert job is not None
 
-    n = reclaim_expired_leases(conn)
-    assert n == 0
+    assert reclaim_expired_leases(conn) == (0, 0)
 
     with conn.cursor() as cur:
         cur.execute("SELECT status FROM jobs WHERE id = %s", (job.id,))
@@ -64,8 +64,7 @@ def test_reaper_ignores_completed_jobs(conn):
         )
     conn.commit()
 
-    n = reclaim_expired_leases(conn)
-    assert n == 0
+    assert reclaim_expired_leases(conn) == (0, 0)
 
     with conn.cursor() as cur:
         cur.execute("SELECT status FROM jobs WHERE id = %s", (job.id,))
@@ -86,8 +85,9 @@ def test_reaper_returns_count_for_multiple_expired(conn):
     fresh = dequeue(conn, worker_id="w-fresh")
     assert fresh is not None
 
-    n = reclaim_expired_leases(conn)
-    assert n == 3
+    reclaimed, dead_lettered = reclaim_expired_leases(conn)
+    assert reclaimed == 3
+    assert dead_lettered == 0
 
     with conn.cursor() as cur:
         cur.execute("SELECT status FROM jobs WHERE id = %s", (fresh.id,))
@@ -109,4 +109,51 @@ def test_reclaimed_job_can_be_redequeued(conn):
 
 
 def test_reaper_no_op_when_table_empty(conn):
-    assert reclaim_expired_leases(conn) == 0
+    assert reclaim_expired_leases(conn) == (0, 0)
+
+
+def test_reaper_dead_letters_when_max_attempts_reached(conn):
+    enqueue(conn, idempotency_key="k", job_type="t", payload={}, max_attempts=2)
+    job = dequeue(conn, worker_id="w1")
+    assert job is not None
+    # dequeue bumped attempt_count to 1; push it to max_attempts so the
+    # reaper sees this as a poison-pill that's exhausted its retries.
+    with conn.cursor() as cur:
+        cur.execute("UPDATE jobs SET attempt_count = 2 WHERE id = %s", (job.id,))
+    conn.commit()
+    _expire_lease(conn, job.id)
+
+    reclaimed, dead_lettered = reclaim_expired_leases(conn)
+    assert reclaimed == 0
+    assert dead_lettered == 1
+
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT status, error_message, completed_at, worker_id, lease_expires_at "
+            "FROM jobs WHERE id = %s",
+            (job.id,),
+        )
+        row = cur.fetchone()
+    status, error_message, completed_at, worker_id, lease_expires_at = row
+    assert status == JobStatus.DEAD_LETTER
+    assert error_message == "lease expired 2 times (max 2)"
+    assert completed_at is not None
+    assert worker_id is None
+    assert lease_expires_at is None
+
+
+def test_reaper_reclaims_when_under_max_attempts(conn):
+    # attempt_count (1, set by dequeue) is below max_attempts (3) — boundary
+    # check that the reaper does NOT dead-letter jobs still inside their budget.
+    enqueue(conn, idempotency_key="k", job_type="t", payload={}, max_attempts=3)
+    job = dequeue(conn, worker_id="w1")
+    assert job is not None
+    _expire_lease(conn, job.id)
+
+    reclaimed, dead_lettered = reclaim_expired_leases(conn)
+    assert reclaimed == 1
+    assert dead_lettered == 0
+
+    with conn.cursor() as cur:
+        cur.execute("SELECT status FROM jobs WHERE id = %s", (job.id,))
+        assert cur.fetchone()[0] == JobStatus.QUEUED
