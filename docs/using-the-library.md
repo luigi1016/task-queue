@@ -89,7 +89,7 @@ psql "$DATABASE_URL" -c "SELECT status, count(*) FROM jobs GROUP BY status;"
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `WORKER_ID` | `$HOSTNAME` | Recorded on each claimed row for lease traceability |
+| `WORKER_ID` | `$HOSTNAME` | Recorded on each claimed row (lease) and copied to `processed_by_worker_id` on resolution for historical attribution |
 | `WORKER_CONCURRENCY` | `1` | Handler threads per pod (1 = serial, no pool) |
 | `POLL_INTERVAL_S` | `5.0` | Max time `listen()` blocks before re-checking the queue |
 | `LEASE_SECONDS` | `60` | Lease duration on each claimed job |
