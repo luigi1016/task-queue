@@ -26,6 +26,7 @@ def reclaim_expired_leases(conn: psycopg.Connection) -> int:
             """
             UPDATE jobs
             SET status = %s,
+                processed_by_worker_id = worker_id,
                 worker_id = NULL,
                 lease_expires_at = NULL
             WHERE status = %s

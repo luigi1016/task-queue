@@ -30,18 +30,29 @@ def test_nack_retries_and_sets_retry_after(conn):
 
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT status, retry_after, error_message, worker_id, lease_expires_at, "
+            "SELECT status, retry_after, error_message, worker_id, "
+            "       processed_by_worker_id, lease_expires_at, "
             "       attempt_count, retry_after > now() "
             "FROM jobs WHERE id = %s",
             (job.id,),
         )
         row = cur.fetchone()
     assert row is not None
-    status, retry_after, error_message, worker_id, lease, attempt_count, future = row
+    (
+        status,
+        retry_after,
+        error_message,
+        worker_id,
+        processed_by_worker_id,
+        lease,
+        attempt_count,
+        future,
+    ) = row
     assert status == JobStatus.QUEUED
     assert retry_after is not None and future is True
     assert error_message == "boom"
     assert worker_id is None
+    assert processed_by_worker_id == "w1"
     assert lease is None
     assert attempt_count == 1
 
@@ -59,7 +70,9 @@ def test_nack_routes_to_dead_letter_when_max_attempts_reached(conn):
         cur.execute("UPDATE jobs SET retry_after = NULL WHERE id = %s", (first.id,))
     conn.commit()
 
-    second = dequeue(conn, worker_id="w1")
+    # Second worker picks up the retried job. processed_by_worker_id should
+    # track the most recent lease holder, so it ends up as "w2" not "w1".
+    second = dequeue(conn, worker_id="w2")
     assert second is not None and second.id == first.id
     assert second.attempt_count == 2
 
@@ -68,16 +81,18 @@ def test_nack_routes_to_dead_letter_when_max_attempts_reached(conn):
 
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT status, error_message, completed_at, worker_id, lease_expires_at "
+            "SELECT status, error_message, completed_at, worker_id, "
+            "       processed_by_worker_id, lease_expires_at "
             "FROM jobs WHERE id = %s",
             (second.id,),
         )
         row = cur.fetchone()
-    status, error_message, completed_at, worker_id, lease = row
+    status, error_message, completed_at, worker_id, processed_by_worker_id, lease = row
     assert status == JobStatus.DEAD_LETTER
     assert error_message == "fail-2"
     assert completed_at is not None
     assert worker_id is None
+    assert processed_by_worker_id == "w2"
     assert lease is None
 
 
