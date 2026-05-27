@@ -118,6 +118,16 @@ WHERE status = 'running'
 GROUP BY worker_id
 ORDER BY worker_id;
 
+-- Throughput per worker over the last hour (completed + dead-lettered).
+-- worker_id is NULL on terminal rows because it's a lease field, so the
+-- attribution lives in processed_by_worker_id instead.
+SELECT processed_by_worker_id, count(*)
+FROM jobs
+WHERE status IN ('succeeded', 'dead_letter')
+  AND completed_at > now() - interval '1 hour'
+GROUP BY processed_by_worker_id
+ORDER BY count DESC;
+
 -- Backlog age (oldest queued job)
 SELECT job_type, count(*), min(created_at) AS oldest
 FROM jobs

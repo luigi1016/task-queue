@@ -23,17 +23,26 @@ def test_ack_marks_succeeded_and_stores_result(conn):
 
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT status, result_payload, completed_at, worker_id, lease_expires_at "
+            "SELECT status, result_payload, completed_at, worker_id, "
+            "       processed_by_worker_id, lease_expires_at "
             "FROM jobs WHERE id = %s",
             (job.id,),
         )
         row = cur.fetchone()
     assert row is not None
-    status, result_payload, completed_at, worker_id, lease_expires_at = row
+    (
+        status,
+        result_payload,
+        completed_at,
+        worker_id,
+        processed_by_worker_id,
+        lease_expires_at,
+    ) = row
     assert status == JobStatus.SUCCEEDED
     assert result_payload == {"output": 42}
     assert completed_at is not None
     assert worker_id is None
+    assert processed_by_worker_id == "w1"
     assert lease_expires_at is None
 
 

@@ -26,6 +26,7 @@ class Job:
     attempt_count: int = 0
     max_attempts: int = 3
     worker_id: str | None = None
+    processed_by_worker_id: str | None = None
     lease_expires_at: datetime | None = None
     retry_after: datetime | None = None
     created_at: datetime = field(default_factory=datetime.utcnow)
