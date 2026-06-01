@@ -1,0 +1,36 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: taskqueue-cleanup
+spec:
+  # Daily at 03:00. The TTL is relative to now(), so a missed tick (cluster down
+  # at this hour) loses nothing — the next run cleans everything up; rows just
+  # live one extra cycle.
+  schedule: "0 3 * * *"
+  concurrencyPolicy: Forbid           # don't overlap if a run is slow
+  successfulJobsHistoryLimit: 3       # keep recent successes for `kubectl logs`
+  failedJobsHistoryLimit: 3
+  startingDeadlineSeconds: 300        # skip a delayed tick rather than fire it late
+  jobTemplate:
+    spec:
+      backoffLimit: 1                 # one retry on failure, then give up
+      template:
+        metadata:
+          labels:
+            app: taskqueue-cleanup
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: cleanup
+              image: taskqueue:latest
+              imagePullPolicy: Never  # use the image built into minikube's daemon
+              env:
+                - name: ROLE
+                  value: cleanup
+                - name: CLEANUP_TTL_DAYS
+                  value: "7"
+                - name: DATABASE_URL
+                  valueFrom:
+                    secretKeyRef:
+                      name: postgres-secret
+                      key: DATABASE_URL

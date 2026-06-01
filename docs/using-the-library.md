@@ -102,6 +102,16 @@ psql "$DATABASE_URL" -c "SELECT status, count(*) FROM jobs GROUP BY status;"
 | `PRODUCER_MAX_PRIORITY` | `9` | Top of the random priority range |
 | `PRODUCER_MAX_ATTEMPTS` | `3` | `max_attempts` set on each enqueued job |
 
+### Cleanup env vars
+
+The `cleanup` role (`python -m taskqueue.cleanup`) hard-deletes jobs in terminal states
+(`succeeded`, `failed`, `dead_letter`) once they age past the TTL, keeping the `jobs` table
+and its indexes from growing without bound.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `CLEANUP_TTL_DAYS` | `7` | Terminal jobs with `completed_at` older than this are deleted |
+
 ### Docker image roles
 
 The image dispatches on `ROLE`:
@@ -112,4 +122,5 @@ docker build -t taskqueue .
 docker run -e ROLE=worker   -e DATABASE_URL=postgres://... taskqueue
 docker run -e ROLE=producer -e DATABASE_URL=postgres://... taskqueue
 docker run -e ROLE=reaper   -e DATABASE_URL=postgres://... taskqueue
+docker run -e ROLE=cleanup  -e DATABASE_URL=postgres://... taskqueue
 ```
