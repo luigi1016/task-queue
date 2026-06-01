@@ -149,6 +149,7 @@ def ack(
                 result_payload = %s::jsonb,
                 completed_at = now(),
                 lease_expires_at = NULL,
+                processed_by_worker_id = worker_id,
                 worker_id = NULL
             WHERE id = %s AND status = %s
             RETURNING id
@@ -208,6 +209,7 @@ def nack(
                     completed_at = now(),
                     error_message = %s,
                     lease_expires_at = NULL,
+                    processed_by_worker_id = worker_id,
                     worker_id = NULL
                 WHERE id = %s
                 """,
@@ -223,6 +225,7 @@ def nack(
                     retry_after = now() + %s,
                     error_message = %s,
                     lease_expires_at = NULL,
+                    processed_by_worker_id = worker_id,
                     worker_id = NULL
                 WHERE id = %s
                 """,

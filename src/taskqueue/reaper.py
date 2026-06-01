@@ -44,6 +44,7 @@ def reclaim_expired_leases(conn: psycopg.Connection) -> tuple[int, int]:
                           || ' times (max ' || max_attempts::text || ')'
                     ELSE error_message
                 END,
+                processed_by_worker_id = worker_id,
                 worker_id = NULL,
                 lease_expires_at = NULL
             WHERE status = %s
