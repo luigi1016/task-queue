@@ -24,14 +24,18 @@ def test_reaper_reclaims_expired_lease(conn):
 
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT status, worker_id, lease_expires_at, attempt_count "
+            "SELECT status, worker_id, processed_by_worker_id, lease_expires_at, "
+            "       attempt_count "
             "FROM jobs WHERE id = %s",
             (job.id,),
         )
         row = cur.fetchone()
-    status, worker_id, lease_expires_at, attempt_count = row
+    status, worker_id, processed_by_worker_id, lease_expires_at, attempt_count = row
     assert status == JobStatus.QUEUED
     assert worker_id is None
+    # Poison-pill debugging: the worker that abandoned the lease is recorded
+    # so we can answer "which worker died on this?" without grepping logs.
+    assert processed_by_worker_id == "w1"
     assert lease_expires_at is None
     # attempt_count from the first dequeue is preserved; reaper doesn't touch it.
     assert attempt_count == 1

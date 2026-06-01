@@ -34,6 +34,7 @@ A single Postgres table is the source of truth for everything: pending work, in-
 | `status` | `queued` / `running` / `succeeded` / `failed` / `dead_letter` (enforced by a `CHECK` constraint) |
 | `attempt_count`, `max_attempts` | Drive retry vs. dead-letter on `nack` |
 | `worker_id`, `lease_expires_at` | Set on claim; cleared on ack/nack/reap |
+| `processed_by_worker_id` | Last worker to resolve the job; persists in terminal states for attribution |
 | `retry_after` | `nack` sets this so the row is invisible to dequeue until backoff elapses |
 | `result_payload`, `error_message` | Whatever the handler returned or the exception text |
 

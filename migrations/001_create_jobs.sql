@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     attempt_count   INTEGER NOT NULL DEFAULT 0,
     max_attempts    INTEGER NOT NULL DEFAULT 3,
     worker_id       TEXT,
+    processed_by_worker_id TEXT,
     lease_expires_at TIMESTAMPTZ,
     retry_after     TIMESTAMPTZ,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
