@@ -18,6 +18,7 @@ docker build -t taskqueue:latest .
 kubectl apply -f k8s/worker-deployment.yaml
 kubectl apply -f k8s/producer-deployment.yaml
 kubectl apply -f k8s/reaper-cronjob.yaml
+kubectl apply -f k8s/cleanup-cronjob.yaml
 
 # Code-only changes (image rebuilt, manifest unchanged) — force a fresh pull
 kubectl rollout restart deployment/taskqueue-worker
@@ -160,6 +161,27 @@ kubectl delete job reaper-now
 ```
 
 `concurrencyPolicy: Forbid` on the CronJob prevents overlapping runs if a tick is slow.
+
+## Running cleanup manually
+
+The cleanup CronJob fires daily (`schedule: "0 3 * * *"`) and deletes terminal jobs older than
+`CLEANUP_TTL_DAYS` (default 7). `main()` is a single-run-and-exit, so these manual commands run
+exactly what the CronJob runs — there's no separate test path.
+
+Local, no cluster (handy while testing):
+
+```bash
+DATABASE_URL=postgres://... python -m taskqueue.cleanup   # "cleanup: deleted N terminal jobs older than 7d"
+```
+
+In-cluster, on demand:
+
+```bash
+kubectl create job --from=cronjob/taskqueue-cleanup cleanup-now
+kubectl wait --for=condition=complete job/cleanup-now --timeout=60s
+kubectl logs job/cleanup-now
+kubectl delete job cleanup-now
+```
 
 ## Worker graceful shutdown
 
