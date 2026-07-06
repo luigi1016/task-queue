@@ -1,0 +1,30 @@
+# Prometheus discovers scrape targets by watching the Kubernetes API for
+# pods (kubernetes_sd_configs in prometheus-configmap.yaml), which needs
+# read access to pod metadata. Note: ClusterRole/Binding are cluster-scoped,
+# so `kubectl delete -f k8s/` now removes objects outside the namespace too.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: prometheus
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: prometheus
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: prometheus
+subjects:
+  - kind: ServiceAccount
+    name: prometheus
+    namespace: default

@@ -11,6 +11,10 @@ spec:
     metadata:
       labels:
         app: taskqueue-worker
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: "/metrics"
     spec:
       # Must exceed LEASE_SECONDS + the longest expected handler runtime
       # so k8s doesn't SIGKILL the pod mid-job (otherwise the reaper has
@@ -20,9 +24,14 @@ spec:
         - name: worker
           image: taskqueue:latest
           imagePullPolicy: Never  # use the image built into minikube's daemon
+          ports:
+            - name: metrics
+              containerPort: 9090
           env:
             - name: ROLE
               value: worker
+            - name: METRICS_PORT
+              value: "9090"
             - name: WORKER_CONCURRENCY
               value: "2"
             - name: POLL_INTERVAL_S

@@ -1,25 +1,26 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: taskqueue-producer
+  name: taskqueue-metrics-exporter
 spec:
+  # One replica is enough — every scrape reads the same database state,
+  # and Prometheus would just scrape duplicate gauges from extra pods.
   replicas: 1
   selector:
     matchLabels:
-      app: taskqueue-producer
+      app: taskqueue-metrics-exporter
   template:
     metadata:
       labels:
-        app: taskqueue-producer
+        app: taskqueue-metrics-exporter
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: "9090"
         prometheus.io/path: "/metrics"
     spec:
-      # Producer is stateless — a short grace period is enough.
       terminationGracePeriodSeconds: 10
       containers:
-        - name: producer
+        - name: exporter
           image: taskqueue:latest
           imagePullPolicy: Never
           ports:
@@ -27,15 +28,9 @@ spec:
               containerPort: 9090
           env:
             - name: ROLE
-              value: producer
+              value: exporter
             - name: METRICS_PORT
               value: "9090"
-            - name: PRODUCER_INTERVAL_S
-              value: "1.0"
-            - name: PRODUCER_MAX_PRIORITY
-              value: "9"
-            - name: PRODUCER_MAX_ATTEMPTS
-              value: "3"
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:

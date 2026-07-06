@@ -17,12 +17,21 @@ docker build -t taskqueue:latest .
 # Manifest changes
 kubectl apply -f k8s/worker-deployment.yaml
 kubectl apply -f k8s/producer-deployment.yaml
+kubectl apply -f k8s/metrics-exporter-deployment.yaml
 kubectl apply -f k8s/reaper-cronjob.yaml
 kubectl apply -f k8s/cleanup-cronjob.yaml
 
 # Code-only changes (image rebuilt, manifest unchanged) — force a fresh pull
 kubectl rollout restart deployment/taskqueue-worker
 kubectl rollout restart deployment/taskqueue-producer
+kubectl rollout restart deployment/taskqueue-metrics-exporter
+```
+
+Prometheus and Grafana are configured via ConfigMaps; after editing one, apply it and restart the consumer:
+
+```bash
+kubectl apply -f k8s/prometheus-configmap.yaml && kubectl rollout restart deployment/prometheus
+kubectl apply -f k8s/grafana-dashboards-configmap.yaml && kubectl rollout restart deployment/grafana
 ```
 
 Migrations are a one-shot Job, not part of the deployment:
@@ -62,6 +71,17 @@ kubectl describe pod <pod-name>
 kubectl exec -it deploy/postgres -- psql -U taskqueue -d taskqueue
 ```
 
+## Metrics and dashboards
+
+The Grafana dashboard is usually the fastest way to see what the queue is doing — throughput, latency percentiles, queue depth, and dead-letter counts, live:
+
+```bash
+kubectl port-forward svc/grafana 3000:3000     # http://localhost:3000/d/taskqueue, no login
+kubectl port-forward svc/prometheus 9092:9090  # http://localhost:9092 for raw PromQL + target health
+```
+
+Metric definitions, SLIs, and troubleshooting missing targets → [telemetry.md](./telemetry.md).
+
 ## Stop and restart without losing data
 
 `scale --replicas=0` pauses a workload while preserving the Deployment, Service, and any in-flight Postgres data:
@@ -89,7 +109,7 @@ Be deliberate about which destroys which:
 | --- | --- | --- |
 | `kubectl scale deployment/X --replicas=0` | Running pods of X | Deployment, Service, PVC, Postgres data |
 | `kubectl delete deployment taskqueue-worker` | Worker Deployment + pods | Postgres, PVC, data |
-| `kubectl delete -f k8s/` | **All** manifests in the dir, including the PVC — **wipes data** | Nothing in the namespace |
+| `kubectl delete -f k8s/` | **All** manifests in the dir, including the PVC — **wipes data** — plus the cluster-scoped Prometheus ClusterRole/Binding | Nothing in the namespace |
 | `minikube delete` | The entire cluster | Nothing |
 
 `kubectl delete -f k8s/` is the footgun — it includes `postgres-pvc.yaml`, so the next `kubectl apply -f k8s/` gives you a fresh empty database. If you want to remove just the workloads and keep the data, delete by file or by name:
@@ -101,6 +121,8 @@ kubectl delete -f k8s/worker-deployment.yaml \
 ```
 
 ## Common queries on the `jobs` table
+
+The canonical copies of these queries live in `src/taskqueue/queries/` (`metrics.py` for the ones the exporter scrapes, `diagnostics.py` for the rest) — if you change one, change it there. They're reproduced here for copy-paste convenience.
 
 Open a psql session first:
 

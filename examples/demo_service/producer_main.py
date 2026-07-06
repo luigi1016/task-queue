@@ -15,7 +15,7 @@ import threading
 import uuid
 
 import taskqueue
-from taskqueue import db
+from taskqueue import db, metrics
 
 from demo_service.handlers import FLAKY, JOB_TYPES
 
@@ -59,6 +59,9 @@ def run_loop(stop: threading.Event) -> int:
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    # Registries are per-process: enqueue counts live here in the producer,
+    # so it needs its own /metrics endpoint for Prometheus to see them.
+    metrics.maybe_start_metrics_server()
     stop = threading.Event()
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     signal.signal(signal.SIGINT, lambda *_: stop.set())

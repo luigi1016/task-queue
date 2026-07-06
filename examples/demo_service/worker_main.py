@@ -13,6 +13,7 @@ import signal
 import socket
 
 import taskqueue
+from taskqueue import metrics
 
 # Side-effect import: running this module's @taskqueue.task decorators is
 # what populates the registry that Worker(handlers=None) reads. Without
@@ -39,6 +40,7 @@ def build_worker() -> taskqueue.Worker:
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    metrics.maybe_start_metrics_server()
     worker = build_worker()
     signal.signal(signal.SIGTERM, lambda *_: worker.stop())
     signal.signal(signal.SIGINT, lambda *_: worker.stop())

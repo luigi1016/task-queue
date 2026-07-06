@@ -29,12 +29,13 @@ from __future__ import annotations
 import concurrent.futures
 import logging
 import threading
+import time
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from typing import Any, Callable
 
 import psycopg
 
-from taskqueue import db
+from taskqueue import db, metrics
 from taskqueue.models import Job
 from taskqueue.notify import listen
 from taskqueue.queue import (
@@ -183,17 +184,29 @@ class Worker:
             # Pool's __exit__ waits for in-flight handlers to drain.
 
     def _process(self, job: Job) -> None:
-        handler = self.handlers.get(job.job_type)
-        if handler is None:
-            self._fail(job, f"no handler registered for job_type={job.job_type!r}")
-            return
-        try:
-            result = handler(job.payload)
-        except Exception as exc:
-            logger.exception("handler raised for job %s (type=%s)", job.id, job.job_type)
-            self._fail(job, str(exc) or exc.__class__.__name__)
-            return
-        self._succeed(job, result)
+        # _process is the unit both execution modes run (inline in serial
+        # mode, pool.submit in pool mode), so the in-flight gauge is
+        # accurate in both. track_inprogress decrements on exception too.
+        with metrics.JOBS_IN_FLIGHT.track_inprogress():
+            handler = self.handlers.get(job.job_type)
+            if handler is None:
+                # No handler ran, so there's no duration to observe.
+                self._fail(job, f"no handler registered for job_type={job.job_type!r}")
+                return
+            start = time.perf_counter()
+            try:
+                result = handler(job.payload)
+            except Exception as exc:
+                metrics.HANDLER_DURATION_SECONDS.labels(job_type=job.job_type).observe(
+                    time.perf_counter() - start
+                )
+                logger.exception("handler raised for job %s (type=%s)", job.id, job.job_type)
+                self._fail(job, str(exc) or exc.__class__.__name__)
+                return
+            metrics.HANDLER_DURATION_SECONDS.labels(job_type=job.job_type).observe(
+                time.perf_counter() - start
+            )
+            self._succeed(job, result)
 
     def _succeed(self, job: Job, result: dict[str, Any] | None) -> None:
         try:
