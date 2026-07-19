@@ -70,6 +70,15 @@ class QueueStateCollector(Collector):
                 value=row[0],
             )
 
+            cur.execute(queries.RECLAIMABLE_COUNT)
+            row = cur.fetchone()
+            assert row is not None
+            yield GaugeMetricFamily(
+                "taskqueue_reclaimable_jobs",
+                "Running jobs with an expired lease, awaiting reaper reclaim.",
+                value=row[0],
+            )
+
 
 def build_registry() -> CollectorRegistry:
     """A fresh registry holding only the queue-state collector.

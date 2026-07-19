@@ -81,6 +81,23 @@ def test_backlog_age_reflects_oldest_queued_job(conn):
     assert 115 <= age <= 180
 
 
+def test_reclaimable_counts_running_jobs_with_expired_lease(conn):
+    with conn.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO jobs (idempotency_key, job_type, payload, status, lease_expires_at)
+            VALUES (%s, 'reap-test', '{}', 'running', now() - interval '30 seconds'),
+                   (%s, 'reap-test', '{}', 'running', now() + interval '30 seconds')
+            """,
+            (_key(), _key()),
+        )
+    conn.commit()
+
+    registry = build_registry()
+    # Only the expired-lease running job is reclaimable; the live-lease one isn't.
+    assert registry.get_sample_value("taskqueue_reclaimable_jobs") == 1
+
+
 def test_gauges_are_fresh_per_collect(conn):
     registry = build_registry()
     assert _depth(registry, "queued") == 0

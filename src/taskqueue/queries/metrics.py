@@ -29,3 +29,12 @@ SELECT count(*) AS dead_letter_jobs
 FROM jobs
 WHERE status = 'dead_letter'
 """
+
+# Running jobs whose lease has expired: exactly what the reaper is about to
+# reclaim. A standing value >0 means handlers are outrunning their lease (or
+# the reaper is behind) — the reaper's backlog, surfaced without a Pushgateway.
+RECLAIMABLE_COUNT = """
+SELECT count(*) AS reclaimable_jobs
+FROM jobs
+WHERE status = 'running' AND lease_expires_at < now()
+"""
