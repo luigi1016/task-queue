@@ -22,10 +22,40 @@ data:
       "time": { "from": "now-30m", "to": "now" },
       "panels": [
         {
+          "id": 100,
+          "type": "row",
+          "title": "Overview",
+          "collapsed": false,
+          "gridPos": { "x": 0, "y": 0, "w": 24, "h": 1 },
+          "panels": []
+        },
+        {
+          "id": 12,
+          "type": "stat",
+          "title": "Workers",
+          "gridPos": { "x": 0, "y": 1, "w": 4, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+          "targets": [
+            { "refId": "A", "expr": "count(up{app=\"taskqueue-worker\"} == 1)", "legendFormat": "workers" }
+          ]
+        },
+        {
+          "id": 13,
+          "type": "stat",
+          "title": "Producers",
+          "gridPos": { "x": 4, "y": 1, "w": 4, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+          "targets": [
+            { "refId": "A", "expr": "count(up{app=\"taskqueue-producer\"} == 1)", "legendFormat": "producers" }
+          ]
+        },
+        {
           "id": 1,
           "type": "timeseries",
           "title": "Throughput (jobs/s)",
-          "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+          "gridPos": { "x": 8, "y": 1, "w": 16, "h": 8 },
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
           "targets": [
@@ -35,21 +65,18 @@ data:
           ]
         },
         {
-          "id": 2,
-          "type": "timeseries",
-          "title": "Queue depth (queued + running)",
-          "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
-          "targets": [
-            { "refId": "A", "expr": "max by (status) (taskqueue_queue_depth{status=~\"queued|running\"})", "legendFormat": "{{status}}" }
-          ]
+          "id": 101,
+          "type": "row",
+          "title": "Latency & SLIs",
+          "collapsed": false,
+          "gridPos": { "x": 0, "y": 9, "w": 24, "h": 1 },
+          "panels": []
         },
         {
           "id": 3,
           "type": "timeseries",
           "title": "Queue wait (enqueue → first dequeue)",
-          "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+          "gridPos": { "x": 0, "y": 10, "w": 12, "h": 8 },
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
           "targets": [
@@ -62,7 +89,7 @@ data:
           "id": 4,
           "type": "timeseries",
           "title": "End-to-end latency (enqueue → success)",
-          "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+          "gridPos": { "x": 12, "y": 10, "w": 12, "h": 8 },
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
           "targets": [
@@ -75,7 +102,7 @@ data:
           "id": 5,
           "type": "timeseries",
           "title": "Handler duration p95 by job type",
-          "gridPos": { "x": 0, "y": 16, "w": 12, "h": 8 },
+          "gridPos": { "x": 0, "y": 18, "w": 12, "h": 8 },
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
           "targets": [
@@ -86,7 +113,7 @@ data:
           "id": 6,
           "type": "timeseries",
           "title": "Error rate (% of dequeues nacked)",
-          "gridPos": { "x": 12, "y": 16, "w": 12, "h": 8 },
+          "gridPos": { "x": 12, "y": 18, "w": 12, "h": 8 },
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "fieldConfig": { "defaults": { "unit": "percent", "min": 0 }, "overrides": [] },
           "targets": [
@@ -94,10 +121,70 @@ data:
           ]
         },
         {
+          "id": 102,
+          "type": "row",
+          "title": "Queue state",
+          "collapsed": false,
+          "gridPos": { "x": 0, "y": 26, "w": 24, "h": 1 },
+          "panels": []
+        },
+        {
+          "id": 2,
+          "type": "timeseries",
+          "title": "Queue depth (queued + running)",
+          "gridPos": { "x": 0, "y": 27, "w": 12, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+          "targets": [
+            { "refId": "A", "expr": "max by (status) (taskqueue_queue_depth{status=~\"queued|running\"})", "legendFormat": "{{status}}" }
+          ]
+        },
+        {
+          "id": 9,
+          "type": "timeseries",
+          "title": "Backlog age by job type (oldest queued job)",
+          "gridPos": { "x": 12, "y": 27, "w": 12, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+          "targets": [
+            { "refId": "A", "expr": "max by (job_type) (taskqueue_backlog_age_seconds)", "legendFormat": "{{job_type}}" }
+          ]
+        },
+        {
+          "id": 15,
+          "type": "timeseries",
+          "title": "Reclaimable jobs (expired lease, awaiting reaper)",
+          "gridPos": { "x": 0, "y": 35, "w": 12, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] },
+          "targets": [
+            { "refId": "A", "expr": "max(taskqueue_reclaimable_jobs)", "legendFormat": "reclaimable" }
+          ]
+        },
+        {
+          "id": 14,
+          "type": "stat",
+          "title": "Succeeded jobs (current)",
+          "gridPos": { "x": 12, "y": 35, "w": 12, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "green" } }, "overrides": [] },
+          "targets": [
+            { "refId": "A", "expr": "max(taskqueue_queue_depth{status=\"succeeded\"})", "legendFormat": "succeeded" }
+          ]
+        },
+        {
+          "id": 103,
+          "type": "row",
+          "title": "Per-worker",
+          "collapsed": false,
+          "gridPos": { "x": 0, "y": 43, "w": 24, "h": 1 },
+          "panels": []
+        },
+        {
           "id": 7,
           "type": "timeseries",
           "title": "Per-worker throughput (acked jobs/s)",
-          "gridPos": { "x": 0, "y": 24, "w": 12, "h": 8 },
+          "gridPos": { "x": 0, "y": 44, "w": 12, "h": 8 },
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
           "targets": [
@@ -108,7 +195,7 @@ data:
           "id": 8,
           "type": "timeseries",
           "title": "In-flight jobs per worker",
-          "gridPos": { "x": 12, "y": 24, "w": 12, "h": 8 },
+          "gridPos": { "x": 12, "y": 44, "w": 12, "h": 8 },
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
           "targets": [
@@ -116,21 +203,18 @@ data:
           ]
         },
         {
-          "id": 9,
-          "type": "timeseries",
-          "title": "Backlog age by job type (oldest queued job)",
-          "gridPos": { "x": 0, "y": 32, "w": 12, "h": 8 },
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
-          "targets": [
-            { "refId": "A", "expr": "max by (job_type) (taskqueue_backlog_age_seconds)", "legendFormat": "{{job_type}}" }
-          ]
+          "id": 104,
+          "type": "row",
+          "title": "Dead-letter & failures",
+          "collapsed": false,
+          "gridPos": { "x": 0, "y": 52, "w": 24, "h": 1 },
+          "panels": []
         },
         {
           "id": 10,
           "type": "stat",
           "title": "Dead-letter jobs",
-          "gridPos": { "x": 12, "y": 32, "w": 4, "h": 8 },
+          "gridPos": { "x": 0, "y": 53, "w": 6, "h": 8 },
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "fieldConfig": {
             "defaults": {
@@ -154,58 +238,14 @@ data:
           "id": 11,
           "type": "timeseries",
           "title": "Dead-letter rate (jobs/s)",
-          "gridPos": { "x": 16, "y": 32, "w": 8, "h": 8 },
+          "gridPos": { "x": 6, "y": 53, "w": 18, "h": 8 },
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "fieldConfig": { "defaults": { "unit": "ops", "min": 0 }, "overrides": [] },
           "targets": [
             { "refId": "A", "expr": "sum(rate(taskqueue_jobs_nacked_total{outcome=\"dead_lettered\"}[5m]))", "legendFormat": "dead-lettered" }
           ]
-        },
-        {
-          "id": 12,
-          "type": "stat",
-          "title": "Workers",
-          "gridPos": { "x": 0, "y": 40, "w": 4, "h": 8 },
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
-          "targets": [
-            { "refId": "A", "expr": "count(up{app=\"taskqueue-worker\"} == 1)", "legendFormat": "workers" }
-          ]
-        },
-        {
-          "id": 13,
-          "type": "stat",
-          "title": "Producers",
-          "gridPos": { "x": 4, "y": 40, "w": 4, "h": 8 },
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
-          "targets": [
-            { "refId": "A", "expr": "count(up{app=\"taskqueue-producer\"} == 1)", "legendFormat": "producers" }
-          ]
-        },
-        {
-          "id": 14,
-          "type": "stat",
-          "title": "Succeeded jobs (current)",
-          "gridPos": { "x": 8, "y": 40, "w": 4, "h": 8 },
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
-          "targets": [
-            { "refId": "A", "expr": "max(taskqueue_queue_depth{status=\"succeeded\"})", "legendFormat": "succeeded" }
-          ]
-        },
-        {
-          "id": 15,
-          "type": "timeseries",
-          "title": "Reclaimable jobs (expired lease, awaiting reaper)",
-          "gridPos": { "x": 12, "y": 40, "w": 12, "h": 8 },
-          "datasource": { "type": "prometheus", "uid": "prometheus" },
-          "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] },
-          "targets": [
-            { "refId": "A", "expr": "max(taskqueue_reclaimable_jobs)", "legendFormat": "reclaimable" }
-          ]
         }
       ],
       "schemaVersion": 39,
-      "version": 3
+      "version": 4
     }
