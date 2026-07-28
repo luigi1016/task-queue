@@ -59,6 +59,20 @@ worker.run()
 
 Prefer this when you need multiple workers with different handler sets in one process, or in tests where global registry state would leak between cases. `Worker(handlers={...})` overrides the default-from-registry behavior — handlers registered via `@task` are ignored.
 
+## Exposing Prometheus metrics
+
+The library records metrics (enqueue/dequeue/ack/nack counters, latency histograms) unconditionally, but they're only visible if your process serves them. Call this once in `main()` — in **both** workers and producers, since each process only holds the metrics for the operations it performed:
+
+```python
+from taskqueue import metrics
+
+def main():
+    metrics.maybe_start_metrics_server()   # METRICS_PORT env var, default 9090; 0 disables
+    ...
+```
+
+Metric reference and dashboard setup → [telemetry.md](./telemetry.md).
+
 ## Running locally without Kubernetes
 
 You can exercise the producer/worker loop without minikube by pointing them at any reachable Postgres. The easiest source is the minikube Postgres via `kubectl port-forward`.
@@ -93,6 +107,7 @@ psql "$DATABASE_URL" -c "SELECT status, count(*) FROM jobs GROUP BY status;"
 | `WORKER_CONCURRENCY` | `1` | Handler threads per pod (1 = serial, no pool) |
 | `POLL_INTERVAL_S` | `5.0` | Max time `listen()` blocks before re-checking the queue |
 | `LEASE_SECONDS` | `60` | Lease duration on each claimed job |
+| `METRICS_PORT` | `9090` | Port for the Prometheus `/metrics` endpoint (`0` disables) |
 
 ### Producer env vars
 
@@ -101,6 +116,7 @@ psql "$DATABASE_URL" -c "SELECT status, count(*) FROM jobs GROUP BY status;"
 | `PRODUCER_INTERVAL_S` | `1.0` | Sleep between enqueues |
 | `PRODUCER_MAX_PRIORITY` | `9` | Top of the random priority range |
 | `PRODUCER_MAX_ATTEMPTS` | `3` | `max_attempts` set on each enqueued job |
+| `METRICS_PORT` | `9090` | Port for the Prometheus `/metrics` endpoint (`0` disables) |
 
 ### Cleanup env vars
 
@@ -123,4 +139,5 @@ docker run -e ROLE=worker   -e DATABASE_URL=postgres://... taskqueue
 docker run -e ROLE=producer -e DATABASE_URL=postgres://... taskqueue
 docker run -e ROLE=reaper   -e DATABASE_URL=postgres://... taskqueue
 docker run -e ROLE=cleanup  -e DATABASE_URL=postgres://... taskqueue
+docker run -e ROLE=exporter -e DATABASE_URL=postgres://... taskqueue   # queue-state Prometheus exporter
 ```

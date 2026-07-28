@@ -91,9 +91,25 @@ kubectl exec deploy/postgres -- psql -U taskqueue -d taskqueue \
 
 You should see `succeeded` and `dead_letter` counts grow steadily while `queued`/`running` stay small and transient.
 
+## Deploy the monitoring stack
+
+`kubectl apply -f k8s/` above already created the Prometheus + Grafana stack (config, RBAC, deployments, services) and the queue-state metrics exporter — the Prometheus and Grafana images are pulled from the internet, unlike the local `taskqueue:latest` image. Verify and open the dashboard:
+
+```bash
+kubectl get pods -l app=prometheus
+kubectl get pods -l app=grafana
+kubectl get pods -l app=taskqueue-metrics-exporter
+
+kubectl port-forward svc/grafana 3000:3000
+open http://localhost:3000/d/taskqueue     # no login required
+```
+
+With the demo producer running you should see throughput, latency percentiles, and queue depth move within a minute. What each panel and metric means → [telemetry.md](./telemetry.md).
+
 ## What's next
 
 - Day-to-day cluster operations → [operations.md](./operations.md)
+- Metrics, SLIs, and dashboards → [telemetry.md](./telemetry.md)
 - How the queue works under the hood → [architecture.md](./architecture.md)
 - Wiring the library into your own service → [using-the-library.md](./using-the-library.md)
 - Running the test suite → [testing.md](./testing.md)

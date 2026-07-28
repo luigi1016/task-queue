@@ -1,0 +1,251 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards
+data:
+  provider.yml: |
+    apiVersion: 1
+    providers:
+      - name: taskqueue
+        folder: ""
+        type: file
+        options:
+          path: /var/lib/grafana/dashboards
+
+  taskqueue.json: |
+    {
+      "uid": "taskqueue",
+      "title": "Task Queue",
+      "tags": ["taskqueue"],
+      "timezone": "browser",
+      "refresh": "10s",
+      "time": { "from": "now-30m", "to": "now" },
+      "panels": [
+        {
+          "id": 100,
+          "type": "row",
+          "title": "Overview",
+          "collapsed": false,
+          "gridPos": { "x": 0, "y": 0, "w": 24, "h": 1 },
+          "panels": []
+        },
+        {
+          "id": 12,
+          "type": "stat",
+          "title": "Workers",
+          "gridPos": { "x": 0, "y": 1, "w": 4, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+          "targets": [
+            { "refId": "A", "expr": "count(up{app=\"taskqueue-worker\"} == 1)", "legendFormat": "workers" }
+          ]
+        },
+        {
+          "id": 13,
+          "type": "stat",
+          "title": "Producers",
+          "gridPos": { "x": 4, "y": 1, "w": 4, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+          "targets": [
+            { "refId": "A", "expr": "count(up{app=\"taskqueue-producer\"} == 1)", "legendFormat": "producers" }
+          ]
+        },
+        {
+          "id": 1,
+          "type": "timeseries",
+          "title": "Throughput (jobs/s)",
+          "gridPos": { "x": 8, "y": 1, "w": 16, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+          "targets": [
+            { "refId": "A", "expr": "sum(rate(taskqueue_jobs_enqueued_total[5m]))", "legendFormat": "enqueued" },
+            { "refId": "B", "expr": "sum(rate(taskqueue_jobs_acked_total[5m]))", "legendFormat": "acked" },
+            { "refId": "C", "expr": "sum(rate(taskqueue_jobs_nacked_total[5m]))", "legendFormat": "nacked" }
+          ]
+        },
+        {
+          "id": 101,
+          "type": "row",
+          "title": "Latency & SLIs",
+          "collapsed": false,
+          "gridPos": { "x": 0, "y": 9, "w": 24, "h": 1 },
+          "panels": []
+        },
+        {
+          "id": 3,
+          "type": "timeseries",
+          "title": "Queue wait (enqueue → first dequeue)",
+          "gridPos": { "x": 0, "y": 10, "w": 12, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+          "targets": [
+            { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le) (rate(taskqueue_queue_wait_seconds_bucket[5m])))", "legendFormat": "p50" },
+            { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(taskqueue_queue_wait_seconds_bucket[5m])))", "legendFormat": "p95" },
+            { "refId": "C", "expr": "histogram_quantile(0.99, sum by (le) (rate(taskqueue_queue_wait_seconds_bucket[5m])))", "legendFormat": "p99" }
+          ]
+        },
+        {
+          "id": 4,
+          "type": "timeseries",
+          "title": "End-to-end latency (enqueue → success)",
+          "gridPos": { "x": 12, "y": 10, "w": 12, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+          "targets": [
+            { "refId": "A", "expr": "histogram_quantile(0.50, sum by (le) (rate(taskqueue_job_e2e_seconds_bucket[5m])))", "legendFormat": "p50" },
+            { "refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(taskqueue_job_e2e_seconds_bucket[5m])))", "legendFormat": "p95" },
+            { "refId": "C", "expr": "histogram_quantile(0.99, sum by (le) (rate(taskqueue_job_e2e_seconds_bucket[5m])))", "legendFormat": "p99" }
+          ]
+        },
+        {
+          "id": 5,
+          "type": "timeseries",
+          "title": "Handler duration p95 by job type",
+          "gridPos": { "x": 0, "y": 18, "w": 12, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+          "targets": [
+            { "refId": "A", "expr": "histogram_quantile(0.95, sum by (le, job_type) (rate(taskqueue_handler_duration_seconds_bucket[5m])))", "legendFormat": "{{job_type}}" }
+          ]
+        },
+        {
+          "id": 6,
+          "type": "timeseries",
+          "title": "Error rate (% of dequeues nacked)",
+          "gridPos": { "x": 12, "y": 18, "w": 12, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "percent", "min": 0 }, "overrides": [] },
+          "targets": [
+            { "refId": "A", "expr": "100 * sum(rate(taskqueue_jobs_nacked_total[5m])) / clamp_min(sum(rate(taskqueue_jobs_dequeued_total[5m])), 1e-9)", "legendFormat": "nacked / dequeued" }
+          ]
+        },
+        {
+          "id": 102,
+          "type": "row",
+          "title": "Queue state",
+          "collapsed": false,
+          "gridPos": { "x": 0, "y": 26, "w": 24, "h": 1 },
+          "panels": []
+        },
+        {
+          "id": 2,
+          "type": "timeseries",
+          "title": "Queue depth (queued + running)",
+          "gridPos": { "x": 0, "y": 27, "w": 12, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+          "targets": [
+            { "refId": "A", "expr": "max by (status) (taskqueue_queue_depth{status=~\"queued|running\"})", "legendFormat": "{{status}}" }
+          ]
+        },
+        {
+          "id": 9,
+          "type": "timeseries",
+          "title": "Backlog age by job type (oldest queued job)",
+          "gridPos": { "x": 12, "y": 27, "w": 12, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+          "targets": [
+            { "refId": "A", "expr": "max by (job_type) (taskqueue_backlog_age_seconds)", "legendFormat": "{{job_type}}" }
+          ]
+        },
+        {
+          "id": 15,
+          "type": "timeseries",
+          "title": "Reclaimable jobs (expired lease, awaiting reaper)",
+          "gridPos": { "x": 0, "y": 35, "w": 12, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "short", "min": 0 }, "overrides": [] },
+          "targets": [
+            { "refId": "A", "expr": "max(taskqueue_reclaimable_jobs)", "legendFormat": "reclaimable" }
+          ]
+        },
+        {
+          "id": 14,
+          "type": "stat",
+          "title": "Succeeded jobs (current)",
+          "gridPos": { "x": 12, "y": 35, "w": 12, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "short", "color": { "mode": "fixed", "fixedColor": "green" } }, "overrides": [] },
+          "targets": [
+            { "refId": "A", "expr": "max(taskqueue_queue_depth{status=\"succeeded\"})", "legendFormat": "succeeded" }
+          ]
+        },
+        {
+          "id": 103,
+          "type": "row",
+          "title": "Per-worker",
+          "collapsed": false,
+          "gridPos": { "x": 0, "y": 43, "w": 24, "h": 1 },
+          "panels": []
+        },
+        {
+          "id": 7,
+          "type": "timeseries",
+          "title": "Per-worker throughput (acked jobs/s)",
+          "gridPos": { "x": 0, "y": 44, "w": 12, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "ops" }, "overrides": [] },
+          "targets": [
+            { "refId": "A", "expr": "sum by (pod) (rate(taskqueue_jobs_acked_total[5m]))", "legendFormat": "{{pod}}" }
+          ]
+        },
+        {
+          "id": 8,
+          "type": "timeseries",
+          "title": "In-flight jobs per worker",
+          "gridPos": { "x": 12, "y": 44, "w": 12, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+          "targets": [
+            { "refId": "A", "expr": "sum by (pod) (taskqueue_jobs_in_flight)", "legendFormat": "{{pod}}" }
+          ]
+        },
+        {
+          "id": 104,
+          "type": "row",
+          "title": "Dead-letter & failures",
+          "collapsed": false,
+          "gridPos": { "x": 0, "y": 52, "w": 24, "h": 1 },
+          "panels": []
+        },
+        {
+          "id": 10,
+          "type": "stat",
+          "title": "Dead-letter jobs",
+          "gridPos": { "x": 0, "y": 53, "w": 6, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  { "color": "green", "value": null },
+                  { "color": "orange", "value": 1 },
+                  { "color": "red", "value": 25 }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "targets": [
+            { "refId": "A", "expr": "max(taskqueue_dead_letter_jobs)", "legendFormat": "dead-letter" }
+          ]
+        },
+        {
+          "id": 11,
+          "type": "timeseries",
+          "title": "Dead-letter rate (jobs/s)",
+          "gridPos": { "x": 6, "y": 53, "w": 18, "h": 8 },
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "fieldConfig": { "defaults": { "unit": "ops", "min": 0 }, "overrides": [] },
+          "targets": [
+            { "refId": "A", "expr": "sum(rate(taskqueue_jobs_nacked_total{outcome=\"dead_lettered\"}[5m]))", "legendFormat": "dead-lettered" }
+          ]
+        }
+      ],
+      "schemaVersion": 39,
+      "version": 4
+    }

@@ -12,6 +12,7 @@ Async task queue library backed by Postgres. Durable job queuing with at-least-o
 | [Setup](docs/setup.md) | First-time install — prereqs, minikube, Postgres, migrations, first deploy |
 | [Operations](docs/operations.md) | kubectl cheatsheet — deploy, scale, inspect, tear down, common SQL, troubleshooting |
 | [Using the library](docs/using-the-library.md) | Decorator + DI patterns, env var reference, running outside k8s |
+| [Telemetry](docs/telemetry.md) | Prometheus + Grafana — metric reference, SLIs, dashboard access |
 | [Testing](docs/testing.md) | `./bin/test`, `./bin/smoke-cronjob` |
 
 ## Quick start

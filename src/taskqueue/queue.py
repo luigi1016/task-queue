@@ -10,6 +10,7 @@ import psycopg
 from psycopg import errors as pg_errors
 from psycopg.rows import dict_row
 
+from taskqueue import metrics
 from taskqueue.models import Job, JobStatus
 
 NOTIFY_NEW_CHANNEL = "jobs_new"
@@ -66,6 +67,7 @@ def enqueue(
             job_id: uuid.UUID = row[0]
             cur.execute("SELECT pg_notify(%s, %s)", (NOTIFY_NEW_CHANNEL, str(job_id)))
         conn.commit()
+        metrics.JOBS_ENQUEUED.labels(job_type=job_type).inc()
         return job_id
     except pg_errors.UniqueViolation as exc:
         conn.rollback()
@@ -123,7 +125,15 @@ def dequeue(
     conn.commit()
     if row is None:
         return None
-    return Job(**row)
+    job = Job(**row)
+    metrics.JOBS_DEQUEUED.labels(job_type=job.job_type).inc()
+    if job.attempt_count == 1 and job.started_at is not None:
+        # started_at and created_at both come from the DB clock, so the
+        # difference is immune to worker/DB clock skew. First attempt only:
+        # retries wait out a deliberate backoff, which isn't queue latency.
+        wait = (job.started_at - job.created_at).total_seconds()
+        metrics.QUEUE_WAIT_SECONDS.labels(job_type=job.job_type).observe(max(wait, 0.0))
+    return job
 
 
 def ack(
@@ -152,15 +162,21 @@ def ack(
                 processed_by_worker_id = worker_id,
                 worker_id = NULL
             WHERE id = %s AND status = %s
-            RETURNING id
+            RETURNING job_type, created_at, completed_at
             """,
             (JobStatus.SUCCEEDED, payload_param, job_id, JobStatus.RUNNING),
         )
-        if cur.fetchone() is None:
+        row = cur.fetchone()
+        if row is None:
             conn.rollback()
             raise JobNotRunningError(job_id)
+        job_type, created_at, completed_at = row
         cur.execute("SELECT pg_notify(%s, %s)", (NOTIFY_DONE_CHANNEL, str(job_id)))
     conn.commit()
+    metrics.JOBS_ACKED.labels(job_type=job_type).inc()
+    # Both timestamps are DB-clock; e2e includes any retries and backoff.
+    e2e = (completed_at - created_at).total_seconds()
+    metrics.JOB_E2E_SECONDS.labels(job_type=job_type).observe(max(e2e, 0.0))
 
 
 def _compute_backoff(attempt: int) -> timedelta:
@@ -192,14 +208,14 @@ def nack(
     """
     with conn.cursor() as cur:
         cur.execute(
-            "SELECT attempt_count, max_attempts FROM jobs WHERE id = %s AND status = %s FOR UPDATE",
+            "SELECT attempt_count, max_attempts, job_type FROM jobs WHERE id = %s AND status = %s FOR UPDATE",
             (job_id, JobStatus.RUNNING),
         )
         row = cur.fetchone()
         if row is None:
             conn.rollback()
             raise JobNotRunningError(job_id)
-        attempt_count, max_attempts = row
+        attempt_count, max_attempts, job_type = row
 
         if attempt_count >= max_attempts:
             cur.execute(
@@ -233,4 +249,5 @@ def nack(
             )
             outcome = NackOutcome.RETRYING
     conn.commit()
+    metrics.JOBS_NACKED.labels(job_type=job_type, outcome=outcome.value).inc()
     return outcome
