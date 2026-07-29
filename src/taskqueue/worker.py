@@ -12,8 +12,9 @@ Two execution modes:
   milliseconds.
 
 - ``concurrency>1``: a ``ThreadPoolExecutor`` of N handler threads. The main
-  thread keeps the pool full. Each handler thread uses its own DB
-  connections (psycopg connections are not thread-safe across operations).
+  thread keeps the pool full. Each handler thread checks its own connection
+  out of the shared pool (psycopg connections are not thread-safe across
+  operations).
   Trade-off: in pool mode, NOTIFY only wakes us when the pool is fully idle.
   When the pool has any in-flight job, the main thread blocks on
   ``concurrent.futures.wait`` which only wakes on completion, so the
@@ -118,10 +119,9 @@ class Worker:
     def run(self) -> None:
         """Run the worker loop until ``stop()`` is called.
 
-        Holds one dedicated autocommit connection for LISTEN/NOTIFY and opens
-        fresh per-operation connections for dequeue/ack/nack. (No connection
-        pool yet — a future psycopg_pool migration could amortize the connect
-        cost under load.)
+        Holds one dedicated autocommit connection for LISTEN/NOTIFY;
+        dequeue/ack/nack check connections out of the shared ``db.pool()``
+        per operation, so no connect handshake sits on the hot path.
         """
         listen_conn = self._make_listen_conn()
         try:
@@ -140,7 +140,7 @@ class Worker:
 
     def _run_serial(self, listen_conn: psycopg.Connection) -> None:
         while not self._stop.is_set():
-            with db.get_connection() as conn:
+            with db.pool().connection() as conn:
                 job = dequeue(
                     conn,
                     worker_id=self.worker_id,
@@ -163,7 +163,7 @@ class Worker:
                 in_flight -= done
 
                 while len(in_flight) < self.concurrency and not self._stop.is_set():
-                    with db.get_connection() as conn:
+                    with db.pool().connection() as conn:
                         job = dequeue(
                             conn,
                             worker_id=self.worker_id,
@@ -210,7 +210,7 @@ class Worker:
 
     def _succeed(self, job: Job, result: dict[str, Any] | None) -> None:
         try:
-            with db.get_connection() as conn:
+            with db.pool().connection() as conn:
                 ack(conn, job_id=job.id, result_payload=result or {})
         except JobNotRunningError:
             # Lease expired and reaper put the job back, or someone else
@@ -221,7 +221,7 @@ class Worker:
 
     def _fail(self, job: Job, error_message: str) -> None:
         try:
-            with db.get_connection() as conn:
+            with db.pool().connection() as conn:
                 outcome = nack(conn, job_id=job.id, error_message=error_message)
         except JobNotRunningError:
             logger.warning("nack failed: job %s no longer in running state", job.id)
