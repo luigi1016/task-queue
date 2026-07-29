@@ -24,7 +24,8 @@ Measurements (Postgres clocks only, immune to host clock skew):
 Safety rails: a step is skipped if worker pods would need more than
 --max-db-connections (default 80, under Postgres's default max_connections
 of 100). Each worker pod uses at most C+3 connections: a pool of C+2 plus
-one dedicated LISTEN connection.
+one dedicated LISTEN connection. The sweep also stops before starting a
+step that would begin past --max-minutes of total runtime (default 60).
 
 Intended for a dev/demo cluster: each step TRUNCATEs the jobs table, and the
 demo producer is scaled to 0 for the duration of the run (restored after).
@@ -256,6 +257,8 @@ def main() -> None:
                         help="skip steps whose worker pods would exceed this (default 80)")
     parser.add_argument("--drain-timeout", type=float, default=900.0,
                         help="per-step drain timeout in seconds (default 900)")
+    parser.add_argument("--max-minutes", type=float, default=60.0,
+                        help="stop the sweep once total runtime exceeds this (default 60)")
     parser.add_argument("--json", metavar="PATH",
                         help="also write results to PATH as JSON")
     args = parser.parse_args()
@@ -270,9 +273,18 @@ def main() -> None:
 
     results: list[StepResult] = []
     best: StepResult | None = None
+    sweep_start = time.monotonic()
     try:
         scale(PRODUCER_DEPLOYMENT, 0)
         for workers, concurrency in steps:
+            elapsed_min = (time.monotonic() - sweep_start) / 60.0
+            if elapsed_min > args.max_minutes:
+                print(
+                    f"\nstopping: sweep has run {elapsed_min:.0f} min "
+                    f"(cap {args.max_minutes:.0f} min)",
+                    flush=True,
+                )
+                break
             needed = workers * (concurrency + 3)
             if needed > args.max_db_connections:
                 print(

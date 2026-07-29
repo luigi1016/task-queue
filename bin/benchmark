@@ -54,5 +54,6 @@ fi
 
 export DATABASE_URL="${DATABASE_URL:-postgresql://taskqueue:taskqueue-dev-password@localhost:5432/taskqueue}"
 
-# examples/ on PYTHONPATH so the script can import the demo job types.
-PYTHONPATH="$ROOT/examples${PYTHONPATH:+:$PYTHONPATH}" exec "$PY" "$ROOT/benchmarks/throughput.py" "$@"
+# src/ and examples/ on PYTHONPATH (same as pytest's pythonpath config) so
+# the script works without an installed package.
+PYTHONPATH="$ROOT/src:$ROOT/examples${PYTHONPATH:+:$PYTHONPATH}" exec "$PY" "$ROOT/benchmarks/throughput.py" "$@"
