@@ -1,8 +1,8 @@
 """Demo producer entry point — enqueues random jobs in a loop.
 
 A real producer would enqueue jobs in response to user actions, scheduled
-triggers, webhook events, etc. The pattern is the same: open a connection,
-call ``taskqueue.enqueue(...)``, close.
+triggers, webhook events, etc. The pattern is the same: check a connection
+out of the pool, call ``taskqueue.enqueue(...)``, return it.
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ def run_loop(stop: threading.Event) -> int:
     enqueued = 0
     while not stop.is_set():
         job_type, payload, priority = _build_random_job()
-        with db.get_connection() as conn:
+        with db.pool().connection() as conn:
             taskqueue.enqueue(
                 conn,
                 idempotency_key=str(uuid.uuid4()),
