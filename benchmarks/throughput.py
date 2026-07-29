@@ -46,7 +46,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 
 import psycopg
 
@@ -72,6 +72,8 @@ class StepResult:
     svc_p95_ms: float
     started_at: str  # ISO-8601 UTC, from the DB clock
     finished_at: str
+    # (ISO-8601 UTC, jobs remaining) samples taken ~1/s during the drain.
+    backlog_samples: list[tuple[str, int]]
 
 
 def kubectl(*args: str) -> str:
@@ -137,17 +139,22 @@ def preload(n: int, threads: int) -> float:
     return time.perf_counter() - t0
 
 
-def wait_drain(conn: psycopg.Connection, expected: int, timeout: float) -> None:
+def wait_drain(
+    conn: psycopg.Connection, expected: int, timeout: float
+) -> list[tuple[str, int]]:
+    """Poll the backlog until it reaches 0. Returns the sampled drain curve."""
     deadline = time.monotonic() + timeout
     last_report = 0.0
+    samples: list[tuple[str, int]] = []
     while time.monotonic() < deadline:
         row = conn.execute(
             "SELECT count(*) FROM jobs WHERE status IN ('queued', 'running')"
         ).fetchone()
         assert row is not None
         remaining = row[0]
+        samples.append((datetime.now(timezone.utc).isoformat(), remaining))
         if remaining == 0:
-            return
+            return samples
         now = time.monotonic()
         if now - last_report > 15.0:
             print(f"    draining... {remaining}/{expected} jobs remaining", flush=True)
@@ -156,7 +163,12 @@ def wait_drain(conn: psycopg.Connection, expected: int, timeout: float) -> None:
     raise TimeoutError(f"queue did not drain within {timeout:.0f}s")
 
 
-def measure(conn: psycopg.Connection, workers: int, concurrency: int) -> StepResult:
+def measure(
+    conn: psycopg.Connection,
+    workers: int,
+    concurrency: int,
+    backlog_samples: list[tuple[str, int]],
+) -> StepResult:
     row = conn.execute(
         """
         SELECT
@@ -184,6 +196,7 @@ def measure(conn: psycopg.Connection, workers: int, concurrency: int) -> StepRes
         svc_p95_ms=svc_p95 * 1000.0,
         started_at=t0.isoformat(),
         finished_at=t1.isoformat(),
+        backlog_samples=backlog_samples,
     )
 
 
@@ -203,7 +216,7 @@ def run_step(
     print(f"    preloaded {args.jobs} jobs in {elapsed:.1f}s", flush=True)
     scale(WORKER_DEPLOYMENT, workers)
     wait_worker_rollout()
-    wait_drain(conn, args.jobs, args.drain_timeout)
+    samples = wait_drain(conn, args.jobs, args.drain_timeout)
 
     failed = conn.execute(
         "SELECT count(*) FROM jobs WHERE status != 'succeeded'"
@@ -212,7 +225,7 @@ def run_step(
     if failed[0] != 0:
         raise RuntimeError(f"{failed[0]} jobs did not succeed; result invalid")
 
-    result = measure(conn, workers, concurrency)
+    result = measure(conn, workers, concurrency, samples)
     print(
         f"    {result.throughput:,.0f} jobs/s over {result.seconds:.1f}s "
         f"(service time p50 {result.svc_p50_ms:.1f}ms, p95 {result.svc_p95_ms:.1f}ms)",
@@ -293,16 +306,21 @@ def main() -> None:
 
     assert best is not None
     print("\n=== results ===")
-    print(f"{'config':>10}  {'jobs/s':>8}  {'svc p50':>8}  {'svc p95':>8}")
+    print(f"{'config':>10}  {'jobs':>7}  {'drained in':>10}  {'jobs/s':>8}  {'svc p50':>8}  {'svc p95':>8}")
     for r in results:
         print(
-            f"{r.workers}x{r.concurrency:>2}{'':>4}  {r.throughput:>8,.0f}  "
-            f"{r.svc_p50_ms:>6.1f}ms  {r.svc_p95_ms:>6.1f}ms"
+            f"{r.workers}x{r.concurrency:>2}{'':>4}  {r.jobs:>7,}  {r.seconds:>9.1f}s  "
+            f"{r.throughput:>8,.0f}  {r.svc_p50_ms:>6.1f}ms  {r.svc_p95_ms:>6.1f}ms"
         )
+    total_jobs = sum(r.jobs for r in results)
     print(
-        f"\npeak: {best.throughput:,.0f} jobs/s "
+        f"\ntotal drained across {len(results)} steps: {total_jobs:,} jobs "
+        f"(every job verified succeeded)"
+    )
+    print(
+        f"peak: {best.throughput:,.0f} jobs/s "
         f"({best.workers} workers x concurrency {best.concurrency}, "
-        f"{best.jobs} jobs in {best.seconds:.1f}s)"
+        f"{best.jobs:,} jobs in {best.seconds:.1f}s)"
     )
     t0 = datetime.fromisoformat(best.started_at)
     t1 = datetime.fromisoformat(best.finished_at)
