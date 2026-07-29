@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+# Run the throughput benchmark against the minikube cluster.
+#
+# Handles the Postgres port-forward and DATABASE_URL setup so you can just:
+#   ./bin/benchmark
+#   ./bin/benchmark --jobs 50000 --steps 2x8,4x8,4x16
+#
+# See benchmarks/throughput.py for methodology and options.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(dirname "$SCRIPT_DIR")"
+
+PY="$ROOT/.venv/bin/python"
+if [ ! -x "$PY" ]; then
+    if command -v python3 >/dev/null 2>&1; then
+        PY=python3
+    else
+        echo "error: no .venv at $ROOT/.venv and no python3 on PATH" >&2
+        echo "create the venv with: python3 -m venv .venv && .venv/bin/pip install -e '.[dev]'" >&2
+        exit 1
+    fi
+fi
+
+if ! kubectl get svc postgres >/dev/null 2>&1; then
+    echo "error: 'postgres' service not found in current kubectl context" >&2
+    echo "is minikube running and are the manifests applied? (kubectl apply -f k8s/)" >&2
+    exit 1
+fi
+
+if lsof -nP -iTCP:5432 -sTCP:LISTEN >/dev/null 2>&1; then
+    echo "error: something is already listening on localhost:5432" >&2
+    echo "stop the existing port-forward (or other Postgres) and re-run" >&2
+    exit 1
+fi
+
+kubectl port-forward svc/postgres 5432:5432 >/dev/null 2>&1 &
+PF_PID=$!
+trap 'kill $PF_PID 2>/dev/null || true; wait $PF_PID 2>/dev/null || true' EXIT
+
+# Wait up to ~5s for the forward to be ready.
+for _ in $(seq 1 20); do
+    if nc -z localhost 5432 2>/dev/null; then
+        break
+    fi
+    sleep 0.25
+done
+
+if ! nc -z localhost 5432 2>/dev/null; then
+    echo "error: port-forward did not come up within 5s" >&2
+    exit 1
+fi
+
+export DATABASE_URL="${DATABASE_URL:-postgresql://taskqueue:taskqueue-dev-password@localhost:5432/taskqueue}"
+
+# examples/ on PYTHONPATH so the script can import the demo job types.
+PYTHONPATH="$ROOT/examples${PYTHONPATH:+:$PYTHONPATH}" exec "$PY" "$ROOT/benchmarks/throughput.py" "$@"

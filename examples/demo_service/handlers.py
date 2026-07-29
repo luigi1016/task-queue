@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 # don't have to repeat the magic strings).
 SLEEP = "sleep"
 FLAKY = "flaky"
+NOOP = "noop"
 
 
 @taskqueue.task(SLEEP)
@@ -40,6 +41,14 @@ def sleep_handler(payload: dict[str, Any]) -> dict[str, Any]:
     logger.info("sleep handler: sleeping for %.3fs", duration)
     time.sleep(duration)
     return {"slept_for": duration}
+
+
+@taskqueue.task(NOOP)
+def noop_handler(payload: dict[str, Any]) -> None:
+    """Return immediately. Gives benchmarks (benchmarks/throughput.py) a
+    job type with zero handler work, so the measured rate is pure queue
+    overhead (dequeue + ack transactions)."""
+    return None
 
 
 @taskqueue.task(FLAKY)
@@ -56,4 +65,5 @@ def flaky_handler(payload: dict[str, Any]) -> dict[str, Any]:
 
 # Producer-side: the job_type strings this demo emits. The producer doesn't
 # need the handler functions themselves — only the names it can enqueue.
+# NOOP is deliberately excluded: it exists for benchmarks, not the demo load.
 JOB_TYPES = [SLEEP, FLAKY]
